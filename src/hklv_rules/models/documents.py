@@ -89,6 +89,18 @@ class NationalId(DocumentBase):
     notary: NotaryInfo | None = None
 
 
+class DeathCertificate(DocumentBase):
+    """Replaces a deceased parent's NID (REQ-08 / REQ-09)."""
+
+    kind: Literal["death_certificate"] = "death_certificate"
+    registration_number: Extracted[str] = Field(default_factory=_str)
+    deceased_name: Extracted[str] = Field(default_factory=_str)
+    date_of_death: Extracted[date] = Field(default_factory=_date)
+    language: Extracted[Language] = Field(default_factory=_lang)
+    has_english_translation: Extracted[bool] = Field(default_factory=_bool)
+    notary: NotaryInfo | None = None
+
+
 class FrcMember(Frozen):
     """One row of the FRC members table. `name` is the raw cell, e.g. 'X S/O: Y & Z'."""
 
@@ -148,6 +160,23 @@ class TradeLicense(DocumentBase):
     license_number: Extracted[str] = Field(default_factory=_str)
     owner_name: Extracted[str] = Field(default_factory=_str)
     fiscal_year: Extracted[str] = Field(default_factory=_str, description="e.g. '2026-2027'")
+    language: Extracted[Language] = Field(default_factory=_lang)
+    has_english_translation: Extracted[bool] = Field(default_factory=_bool)
+    notary: NotaryInfo | None = None
+
+
+class EmploymentCertificate(DocumentBase):
+    """Alternative to the Trade License (REQ-06): a parent's employer confirms employment."""
+
+    kind: Literal["employment_certificate"] = "employment_certificate"
+    employee_name: Extracted[str] = Field(default_factory=_str)
+    employer_name: Extracted[str] = Field(default_factory=_str)
+    designation: Extracted[str] = Field(default_factory=_str)
+    issue_date: Extracted[date] = Field(default_factory=_date, description="Date the letter was issued")
+    currently_employed: Extracted[bool] = Field(
+        default_factory=_bool,
+        description="Letter says the person IS employed now (not an experience/release letter)",
+    )
     language: Extracted[Language] = Field(default_factory=_lang)
     has_english_translation: Extracted[bool] = Field(default_factory=_bool)
     notary: NotaryInfo | None = None

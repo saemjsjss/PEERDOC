@@ -7,14 +7,13 @@ for manual review rather than a hard FAIL.
 
 from __future__ import annotations
 
-import calendar
 import re
-from datetime import date
 
 from ..context import EvaluationContext
 from ..identity import MatchKind, compare_name
 from ..models import FamilyRelationshipCertificate, FrcMember, Outcome, Person, RuleResult, worst
 from ._evidence import ev
+from ._shared import notary_rule, recency_rule, subtract_months  # noqa: F401 (re-exported)
 
 FRC_01, FRC_02, FRC_03, FRC_04, FRC_05 = "FRC-01", "FRC-02", "FRC-03", "FRC-04", "FRC-05"
 ALL_RULES = (FRC_01, FRC_02, FRC_03, FRC_04, FRC_05)
@@ -181,61 +180,13 @@ def _outcome_for(kind: MatchKind) -> Outcome:
 # --- FRC-04 Date ------------------------------------------------------------------
 
 
-def subtract_months(d: date, months: int) -> date:
-    total = d.year * 12 + (d.month - 1) - months
-    year, month = divmod(total, 12)
-    month += 1
-    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
-
-
 def _frc_04_date(frc: FamilyRelationshipCertificate, ctx: EvaluationContext) -> RuleResult:
     fields = [("issue_date", frc.issue_date), ("registration_date", frc.registration_date)]
-    evidence = tuple(ev(frc.doc_id, name, f) for name, f in fields if f.found)
-
-    def result(outcome: Outcome, reason: str) -> RuleResult:
-        return RuleResult(rule_id=FRC_04, outcome=outcome, reason=reason, evidence=evidence)
-
-    found = [f for _, f in fields if f.found]
-    if not found:
-        return result(Outcome.FLAG, "No Date of Issue or Registration found")
-    reliable = [f.value for f in found if f.is_reliable(ctx.threshold)]
-    unreliable = len(found) - len(reliable)
-
-    today = ctx.case.evaluation_date
-    cutoff = subtract_months(today, _VALIDITY_MONTHS)
-    if not reliable:
-        return result(Outcome.FLAG, "Date of Issue/Registration read with low OCR confidence")
-    latest = max(reliable)
-    if latest > today:
-        return result(Outcome.FLAG, f"Date {latest:%d-%m-%Y} is after the evaluation date {today:%d-%m-%Y}")
-    if latest >= cutoff:
-        return result(Outcome.PASS, f"Dated {latest:%d-%m-%Y}, within 3 months (on or after {cutoff:%d-%m-%Y})")
-    if unreliable:
-        return result(
-            Outcome.FLAG,
-            f"Readable date {latest:%d-%m-%Y} is older than 3 months, but another date is unreadable",
-        )
-    return result(Outcome.FAIL, f"Dated {latest:%d-%m-%Y}, older than 3 months (cutoff {cutoff:%d-%m-%Y})")
+    return recency_rule(FRC_04, frc.doc_id, fields, _VALIDITY_MONTHS, ctx, what="Date of Issue or Registration")
 
 
 # --- FRC-05 Notary ------------------------------------------------------------------
 
 
 def _frc_05_notary(frc: FamilyRelationshipCertificate, ctx: EvaluationContext) -> RuleResult:
-    def result(outcome: Outcome, reason: str, evidence=()) -> RuleResult:
-        return RuleResult(rule_id=FRC_05, outcome=outcome, reason=reason, evidence=evidence)
-
-    if frc.notary is None:
-        return result(Outcome.FAIL, "Not notarised: no Notary Public/Advocate text or stamp")
-    evidence = (
-        ev(frc.doc_id, "notary.notary_text_present", frc.notary.notary_text_present),
-        ev(frc.doc_id, "notary.stamp_present", frc.notary.stamp_present),
-    )
-    text = ctx.tri_state(frc.notary.notary_text_present)
-    stamp = ctx.tri_state(frc.notary.stamp_present)
-    missing = [label for label, v in (("Notary Public/Advocate text", text), ("stamp", stamp)) if v is False]
-    if missing:
-        return result(Outcome.FAIL, f"Not notarised: missing {' and '.join(missing)}", evidence)
-    if text is None or stamp is None:
-        return result(Outcome.FLAG, "Notarisation could not be confirmed (low OCR confidence)", evidence)
-    return result(Outcome.PASS, "Notary Public/Advocate text and stamp present", evidence)
+    return notary_rule(FRC_05, frc.doc_id, frc.notary, ctx)

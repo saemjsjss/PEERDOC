@@ -1,17 +1,16 @@
 """Rulebook v2.5 section 5.1: the financial chain (strict parent match).
 
-TIN Taxpayer and Trade License Owner must be the same parent. Bank documents are
-deliberately NOT part of this chain.
-
-Not yet covered: the Employment Certificate alternative to the Trade License
-(REQ-06), which has no signature or extraction model until its rules are approved.
+The TIN Taxpayer and the holder of the income document must be the same parent. The
+income document is the Trade License or, instead of it, an Employment Certificate
+(REQ-06). Bank documents are deliberately NOT part of this chain.
 """
 
 from __future__ import annotations
 
 from ..context import EvaluationContext
-from ..identity import Identification, IdStatus, affidavit_bridge, identify, MatchKind
-from ..models import Outcome, Person, RuleResult, TinCertificate, TradeLicense
+from ..identity import Identification, IdStatus, MatchKind, affidavit_bridge, identify
+from ..models import EmploymentCertificate, Extracted, Outcome, Person, RuleResult, TinCertificate, TradeLicense
+from ..models.common import Frozen
 from ..names import normalize_name
 from ._evidence import ev
 
@@ -19,68 +18,159 @@ CHAIN_01, CHAIN_02, CHAIN_03 = "CHAIN-01", "CHAIN-02", "CHAIN-03"
 _PARENTS = (Person.FATHER, Person.MOTHER)
 
 
+class _Income(Frozen):
+    """The chain's second link: a Trade License (owner) or an Employment Certificate (employee)."""
+
+    doc_id: str
+    label: str
+    holder: str
+    field: str
+    name: Extracted[str]
+
+    @classmethod
+    def of(cls, doc: TradeLicense | EmploymentCertificate) -> "_Income":
+        if isinstance(doc, TradeLicense):
+            return cls(doc_id=doc.doc_id, label="Trade License", holder="owner", field="owner_name", name=doc.owner_name)
+        return cls(
+            doc_id=doc.doc_id,
+            label="Employment Certificate",
+            holder="employee",
+            field="employee_name",
+            name=doc.employee_name,
+        )
+
+    @property
+    def describe(self) -> str:
+        return f"{self.label} {self.holder}"
+
+
 def check_financial_chain(ctx: EvaluationContext) -> list[RuleResult]:
     tins = ctx.case.of_kind(TinCertificate)
-    trades = ctx.case.of_kind(TradeLicense)
+    incomes = [_Income.of(d) for d in [*ctx.case.of_kind(TradeLicense), *ctx.case.of_kind(EmploymentCertificate)]]
 
-    gap = _structural_problem(tins, trades)
-    if gap is not None:
+    gap = _structural_problem(tins, incomes)
+    if gap is not None and gap[0] is Outcome.FAIL:
         return [RuleResult(rule_id=r, outcome=gap[0], reason=gap[1]) for r in (CHAIN_01, CHAIN_02, CHAIN_03)]
+    if gap is not None:
+        return _gated(ctx, tins, incomes, gap[1])
 
-    tin, trade = tins[0], trades[0]
-    tin_name, trade_name = tin.taxpayer_name, trade.owner_name
+    tin, income = tins[0], incomes[0]
+    tin_name, income_name = tin.taxpayer_name, income.name
     evidence = (
         ev(tin.doc_id, "taxpayer_name", tin_name),
-        ev(trade.doc_id, "owner_name", trade_name),
+        ev(income.doc_id, income.field, income_name),
     )
 
     unreadable = [
         f"{label} '{n.value}' read with low OCR confidence" if n.found else f"{label} not found by OCR"
-        for label, n in (("TIN taxpayer name", tin_name), ("Trade License owner name", trade_name))
+        for label, n in (("TIN taxpayer name", tin_name), (f"{income.describe} name", income_name))
         if not n.is_reliable(ctx.threshold) or not normalize_name(n.value)
     ]
     if unreadable:
-        reason = "; ".join(unreadable)
-        return [
-            RuleResult(rule_id=r, outcome=Outcome.FLAG, reason=reason, evidence=evidence)
-            for r in (CHAIN_01, CHAIN_02, CHAIN_03)
-        ]
+        return _gated(ctx, tins, incomes, "; ".join(unreadable), evidence)
 
     tin_id = identify(tin_name, ctx)
-    trade_id = identify(trade_name, ctx)
+    income_id = identify(income_name, ctx)
     return [
-        _chain_01(ctx, tin_name.value, trade_name.value, evidence),
-        _chain_02(tin_id, trade_id, evidence),
-        _chain_03(tin_id, trade_id, evidence),
+        _chain_01(ctx, tin_name.value, income_name.value, income, evidence),
+        _chain_02(tin_id, income_id, income.label, evidence),
+        _chain_03(tin_id, income_id, income.label, evidence),
     ]
 
 
-def _structural_problem(tins: list, trades: list) -> tuple[Outcome, str] | None:
-    missing = [label for label, docs in (("TIN Certificate", tins), ("Trade License", trades)) if not docs]
+def _settled(names: list[Extracted[str]], ctx: EvaluationContext) -> Person | IdStatus | None:
+    """What a group of candidate documents certainly says on its own, if anything.
+
+    Returns Person.STUDENT if every document is reliably the student's, IdStatus.UNKNOWN if
+    every one reliably matches nobody, else None. With several candidates the reviewer may
+    pick any, so only a verdict shared by all of them is certain.
+    """
+    verdicts = set()
+    for n in names:
+        if not n.is_reliable(ctx.threshold) or not normalize_name(n.value):
+            return None
+        i = identify(n, ctx)
+        if i.status is IdStatus.IDENTIFIED and i.person is Person.STUDENT:
+            verdicts.add(Person.STUDENT)
+        elif i.status is IdStatus.UNKNOWN:
+            verdicts.add(IdStatus.UNKNOWN)
+        else:
+            return None
+    return verdicts.pop() if len(verdicts) == 1 else None
+
+
+def _gated(
+    ctx: EvaluationContext, tins: list, incomes: list[_Income], why: str, evidence=()
+) -> list[RuleResult]:
+    """The chain can't be compared (a link is unreadable or duplicated), so CHAIN-01 FLAGs.
+
+    CHAIN-02 and CHAIN-03 still FAIL when one link on its own already decides them: a link
+    reliably in the student's name, or one that reliably matches no family member.
+    """
+    labels = {i.label for i in incomes}
+    income_label = labels.pop() if len(labels) == 1 else "Trade License/Employment Certificate"
+    settled = [
+        (label, v)
+        for label, v in (
+            ("TIN", _settled([t.taxpayer_name for t in tins], ctx)),
+            (income_label, _settled([i.name for i in incomes], ctx)),
+        )
+        if v is not None
+    ]
+    students = [label for label, v in settled if v is Person.STUDENT]
+    strangers = [label for label, v in settled if v is IdStatus.UNKNOWN]
+
+    def flag(rule_id: str) -> RuleResult:
+        return RuleResult(rule_id=rule_id, outcome=Outcome.FLAG, reason=why, evidence=evidence)
+
+    def fail(rule_id: str, reason: str) -> RuleResult:
+        return RuleResult(rule_id=rule_id, outcome=Outcome.FAIL, reason=f"{reason} ({why})", evidence=evidence)
+
+    out = [flag(CHAIN_01)]
+    if students or strangers:
+        parts = [f"{label} is in the student's name" for label in students]
+        parts += [f"{label} name matches no parent" for label in strangers]
+        out.append(fail(CHAIN_02, "; ".join(parts) + "; the chain must belong to one parent"))
+    else:
+        out.append(flag(CHAIN_02))
+    if students:
+        out.append(fail(CHAIN_03, f"{' and '.join(students)} in the student's name (StudentRef); must be a parent"))
+    else:
+        out.append(flag(CHAIN_03))
+    return out
+
+
+def _structural_problem(tins: list, incomes: list[_Income]) -> tuple[Outcome, str] | None:
+    groups = (("TIN Certificate", tins), ("Trade License or Employment Certificate", incomes))
+    missing = [label for label, docs in groups if not docs]
     if missing:
         return Outcome.FAIL, f"Financial chain cannot be established: no {' and no '.join(missing)}"
-    extra = [label for label, docs in (("TIN Certificates", tins), ("Trade Licenses", trades)) if len(docs) > 1]
+    extra = [label for label, docs in groups if len(docs) > 1]
     if extra:
-        return Outcome.FLAG, f"More than one {' and '.join(extra)} found; reviewer must pick which forms the chain"
+        return (
+            Outcome.FLAG,
+            f"More than one {' and more than one '.join(extra)} found; reviewer must pick which forms the chain",
+        )
     return None
 
 
-def _chain_01(ctx: EvaluationContext, tin: str, trade: str, evidence) -> RuleResult:
-    if normalize_name(tin) == normalize_name(trade):
+def _chain_01(ctx: EvaluationContext, tin: str, other: str, income: _Income, evidence) -> RuleResult:
+    who = income.describe
+    if normalize_name(tin) == normalize_name(other):
         return RuleResult(
             rule_id=CHAIN_01,
             outcome=Outcome.PASS,
-            reason=f"TIN taxpayer '{tin}' and Trade License owner '{trade}' are identical",
+            reason=f"TIN taxpayer '{tin}' and {who} '{other}' are identical",
             evidence=evidence,
         )
     # A same-person affidavit for either parent can bridge a spelling difference (5.2).
-    verdicts = [affidavit_bridge(ctx, p, tin, trade) for p in _PARENTS]
+    verdicts = [affidavit_bridge(ctx, p, tin, other) for p in _PARENTS]
     for kind, why in verdicts:
         if kind is MatchKind.AFFIDAVIT:
             return RuleResult(
                 rule_id=CHAIN_01,
                 outcome=Outcome.PASS,
-                reason=f"TIN taxpayer '{tin}' and Trade License owner '{trade}' differ in spelling, covered by {why}",
+                reason=f"TIN taxpayer '{tin}' and {who} '{other}' differ in spelling, covered by {why}",
                 evidence=evidence,
             )
     unsure = [why for kind, why in verdicts if kind is MatchKind.UNCERTAIN]
@@ -88,13 +178,13 @@ def _chain_01(ctx: EvaluationContext, tin: str, trade: str, evidence) -> RuleRes
         return RuleResult(
             rule_id=CHAIN_01,
             outcome=Outcome.FLAG,
-            reason=f"TIN taxpayer '{tin}' and Trade License owner '{trade}' differ; {'; '.join(unsure)}",
+            reason=f"TIN taxpayer '{tin}' and {who} '{other}' differ; {'; '.join(unsure)}",
             evidence=evidence,
         )
     return RuleResult(
         rule_id=CHAIN_01,
         outcome=Outcome.FAIL,
-        reason=f"TIN taxpayer '{tin}' and Trade License owner '{trade}' are not identical",
+        reason=f"TIN taxpayer '{tin}' and {who} '{other}' are not identical",
         evidence=evidence,
     )
 
@@ -103,50 +193,41 @@ def _label(i: Identification) -> str:
     return i.person.value.title() if i.person else "nobody"
 
 
-def _chain_02(tin: Identification, trade: Identification, evidence) -> RuleResult:
+def _chain_02(tin: Identification, other: Identification, label: str, evidence) -> RuleResult:
     def result(outcome: Outcome, reason: str) -> RuleResult:
         return RuleResult(rule_id=CHAIN_02, outcome=outcome, reason=reason, evidence=evidence)
 
-    both = (tin, trade)
-    if all(i.status is IdStatus.IDENTIFIED for i in both):
-        if tin.person is trade.person and tin.person in _PARENTS:
-            return result(Outcome.PASS, f"TIN and Trade License both belong to the {_label(tin)}")
-        if tin.person in _PARENTS and trade.person in _PARENTS:
+    pair = (("TIN", tin), (label, other))
+    if all(i.status is IdStatus.IDENTIFIED for _, i in pair):
+        if tin.person is other.person and tin.person in _PARENTS:
+            return result(Outcome.PASS, f"TIN and {label} both belong to the {_label(tin)}")
+        if tin.person in _PARENTS and other.person in _PARENTS:
             return result(
                 Outcome.FAIL,
-                f"TIN belongs to the {_label(tin)} but Trade License belongs to the {_label(trade)}; "
+                f"TIN belongs to the {_label(tin)} but {label} belongs to the {_label(other)}; "
                 "both must belong to the same parent",
             )
         return result(
             Outcome.FAIL,
-            f"TIN belongs to {_label(tin)}, Trade License to {_label(trade)}; both must belong to one parent",
+            f"TIN belongs to {_label(tin)}, {label} to {_label(other)}; both must belong to one parent",
         )
     # A document identified as nobody can never satisfy the chain, whatever the other says.
-    unknown = [
-        f"{doc} name matches no parent ({i.reason})"
-        for doc, i in (("TIN", tin), ("Trade License", trade))
-        if i.status is IdStatus.UNKNOWN
-    ]
+    unknown = [f"{doc} name matches no parent ({i.reason})" for doc, i in pair if i.status is IdStatus.UNKNOWN]
     if unknown:
         return result(Outcome.FAIL, "; ".join(unknown))
-    unsure = [
-        f"{doc}: {i.reason}" for doc, i in (("TIN", tin), ("Trade License", trade)) if i.status is not IdStatus.IDENTIFIED
-    ]
+    unsure = [f"{doc}: {i.reason}" for doc, i in pair if i.status is not IdStatus.IDENTIFIED]
     return result(Outcome.FLAG, "Could not confirm which parent owns the chain: " + "; ".join(unsure))
 
 
-def _chain_03(tin: Identification, trade: Identification, evidence) -> RuleResult:
+def _chain_03(tin: Identification, other: Identification, label: str, evidence) -> RuleResult:
     def result(outcome: Outcome, reason: str) -> RuleResult:
         return RuleResult(rule_id=CHAIN_03, outcome=outcome, reason=reason, evidence=evidence)
 
-    students = [doc for doc, i in (("TIN", tin), ("Trade License", trade)) if i.person is Person.STUDENT]
+    pair = (("TIN", tin), (label, other))
+    students = [doc for doc, i in pair if i.person is Person.STUDENT]
     if students:
         return result(Outcome.FAIL, f"{' and '.join(students)} in the student's name (StudentRef); must be a parent")
-    unsure = [
-        f"{doc}: {i.reason}"
-        for doc, i in (("TIN", tin), ("Trade License", trade))
-        if i.status in (IdStatus.AMBIGUOUS, IdStatus.UNCERTAIN)
-    ]
+    unsure = [f"{doc}: {i.reason}" for doc, i in pair if i.status in (IdStatus.AMBIGUOUS, IdStatus.UNCERTAIN)]
     if unsure:
         return result(Outcome.FLAG, "Could not rule out the student's name: " + "; ".join(unsure))
-    return result(Outcome.PASS, "Neither TIN nor Trade License is in the student's name")
+    return result(Outcome.PASS, f"Neither TIN nor {label} is in the student's name")

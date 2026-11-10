@@ -9,7 +9,9 @@ from .documents import (
     BankSolvency,
     BankStatement,
     BirthCertificate,
+    DeathCertificate,
     EApostille,
+    EmploymentCertificate,
     FamilyRelationshipCertificate,
     FrcMember,
     IncomeTaxAcknowledgement,
@@ -22,7 +24,7 @@ from .documents import (
     TinCertificate,
     TradeLicense,
 )
-from .verdict import Evidence, Outcome, RuleResult, overall, worst
+from .verdict import CaseVerdict, Evidence, Outcome, RuleResult, overall, worst
 
 __all__ = [
     "AcademicCertificate",
@@ -34,9 +36,12 @@ __all__ = [
     "BankStatement",
     "BirthCertificate",
     "CaseFile",
+    "CaseVerdict",
     "DEFAULT_CONFIDENCE_THRESHOLD",
+    "DeathCertificate",
     "Document",
     "EApostille",
+    "EmploymentCertificate",
     "Evidence",
     "Extracted",
     "FamilyRelationshipCertificate",

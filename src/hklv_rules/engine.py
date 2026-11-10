@@ -1,0 +1,98 @@
+"""The master Verdict Engine (Rulebook v2.5 section 6).
+
+`final_verdict` turns a list of rule results into the overall verdict:
+    any FAIL -> FAIL;  else any FLAG -> FLAG;  else PASS.
+
+`evaluate_case` runs every rule written so far on one student's documents and returns
+that verdict. Rule groups not yet written are reported as an ENGINE-COVERAGE FLAG, so an
+incomplete engine can never hand out a clean PASS.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from .context import EvaluationContext
+from .models import DEFAULT_CONFIDENCE_THRESHOLD, CaseFile, CaseVerdict, Outcome, RuleResult, worst
+from .rules import (
+    assign_nids,
+    check_death_certificates,
+    check_employment,
+    check_financial_chain,
+    check_frc,
+    check_required_documents,
+)
+
+COVERAGE_RULE = "ENGINE-COVERAGE"
+
+# Remove each entry as its rules land. While anything is listed, every case gets a FLAG.
+NOT_YET_IMPLEMENTED: tuple[str, ...] = (
+    "PASSPORT-01",
+    "NID-01..03",
+    "BIRTH-01..04",
+    "BANK-01..04",
+    "TRADE-01..04",
+    "TIN-01..03",
+    "ACAD-01..04",
+    "TAX-01..04",
+    "LANG-01..02",
+)
+
+
+def final_verdict(results: Iterable[RuleResult]) -> CaseVerdict:
+    """Overall verdict from all rule results: any FAIL -> FAIL, else any FLAG -> FLAG, else PASS.
+
+    An empty list is FLAG, not PASS: no results means nothing was checked, and "nothing
+    checked" must never read as "valid".
+    """
+    results = tuple(results)
+    if not results:
+        return CaseVerdict(
+            outcome=Outcome.FLAG,
+            summary="No rule results were produced; nothing was checked, so manual review is required",
+            results=(),
+        )
+
+    outcome = worst(r.outcome for r in results)
+    fails = _rule_ids(r for r in results if r.outcome is Outcome.FAIL)
+    flags = _rule_ids(r for r in results if r.outcome is Outcome.FLAG)
+    if outcome is Outcome.FAIL:
+        summary = f"FAIL: {len(fails)} rule(s) failed ({', '.join(fails)})"
+        if flags:
+            summary += f"; {len(flags)} also flagged ({', '.join(flags)})"
+    elif outcome is Outcome.FLAG:
+        summary = f"FLAG: needs manual review; {len(flags)} rule(s) flagged ({', '.join(flags)})"
+    else:
+        summary = f"PASS: all {len(results)} checks passed"
+    return CaseVerdict(outcome=outcome, summary=summary, results=results)
+
+
+def _rule_ids(results: Iterable[RuleResult]) -> list[str]:
+    """Distinct rule ids in first-seen order (FRC rules repeat per FRC, NID-ASSIGN per NID)."""
+    return list(dict.fromkeys(r.rule_id for r in results))
+
+
+def run_all_rules(ctx: EvaluationContext) -> list[RuleResult]:
+    nids = assign_nids(ctx)
+    deaths = check_death_certificates(ctx)
+    results = [
+        *check_required_documents(ctx, nids, deaths),
+        *nids.results,
+        *deaths.results,
+        *check_frc(ctx),
+        *check_employment(ctx),
+        *check_financial_chain(ctx),
+    ]
+    if NOT_YET_IMPLEMENTED:
+        results.append(
+            RuleResult(
+                rule_id=COVERAGE_RULE,
+                outcome=Outcome.FLAG,
+                reason="Rules not yet implemented, check by hand: " + ", ".join(NOT_YET_IMPLEMENTED),
+            )
+        )
+    return results
+
+
+def evaluate_case(case: CaseFile, threshold: float = DEFAULT_CONFIDENCE_THRESHOLD) -> CaseVerdict:
+    return final_verdict(run_all_rules(EvaluationContext.build(case, threshold)))

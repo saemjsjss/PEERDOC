@@ -14,16 +14,22 @@ from hklv_rules.context import EvaluationContext
 from hklv_rules.models import (
     Affidavit,
     AffidavitEntry,
+    BankSolvency,
+    BankStatement,
     BirthCertificate,
     CaseFile,
+    DeathCertificate,
+    EmploymentCertificate,
     Extracted,
     FamilyRelationshipCertificate,
     FrcMember,
     NationalId,
     NidVariant,
     NotaryInfo,
+    Language,
     Passport,
     Person,
+    Photo,
     TinCertificate,
     TradeLicense,
 )
@@ -145,3 +151,72 @@ def by_rule(results) -> dict:
         assert r.rule_id not in out, f"duplicate {r.rule_id}"
         out[r.rule_id] = r
     return out
+
+
+def employment(
+    name: str = FATHER,
+    issue_date: date | None = date(2026, 10, 1),
+    currently_employed: bool | None = True,
+    language: Language = Language.ENGLISH,
+    translated: bool | None = None,
+    notary=_DEFAULT,
+    confidence: float = HIGH,
+    status_confidence: float = HIGH,
+    doc_id: str = "employment",
+) -> EmploymentCertificate:
+    return EmploymentCertificate(
+        doc_id=doc_id,
+        employee_name=ex(name, confidence),
+        employer_name=ex("NORTHWIND TEXTILES LTD"),
+        designation=ex("SENIOR ACCOUNTANT"),
+        issue_date=ex(issue_date) if issue_date else Extracted[date](),
+        currently_employed=(
+            ex(currently_employed, status_confidence) if currently_employed is not None else Extracted[bool]()
+        ),
+        language=ex(language),
+        has_english_translation=ex(translated) if translated is not None else Extracted[bool](),
+        notary=notarised() if notary is _DEFAULT else notary,
+    )
+
+
+def death(
+    name: str = FATHER,
+    date_of_death: date | None = date(2021, 3, 14),
+    language: Language = Language.BANGLA,
+    translated: bool | None = True,
+    notary=_DEFAULT,
+    confidence: float = HIGH,
+    date_confidence: float = HIGH,
+    doc_id: str = "death",
+) -> DeathCertificate:
+    return DeathCertificate(
+        doc_id=doc_id,
+        deceased_name=ex(name, confidence),
+        date_of_death=ex(date_of_death, date_confidence) if date_of_death else Extracted[date](),
+        language=ex(language),
+        has_english_translation=ex(translated) if translated is not None else Extracted[bool](),
+        notary=notarised() if notary is _DEFAULT else notary,
+    )
+
+
+def complete_case_documents() -> list:
+    """A full, valid fictional submission (everything section 3 requires)."""
+    return [
+        Photo(doc_id="photo"),
+        frc(),
+        BankSolvency(doc_id="solvency", account_holder=ex(FATHER), account_number=ex("0123456789")),
+        BankStatement(doc_id="statement", account_holder=ex(FATHER), account_number=ex("0123456789")),
+        trade(FATHER),
+        tin(FATHER),
+        nid("n-father", FATHER),
+        nid("n-mother", MOTHER),
+    ]
+
+
+def case_file(*docs, evaluation_date: date = EVAL_DATE) -> CaseFile:
+    """CaseFile with the default passport + birth certificate prepended."""
+    return CaseFile(
+        case_id="test",
+        evaluation_date=evaluation_date,
+        documents=(passport(), birth_certificate(), *docs),
+    )

@@ -32,6 +32,22 @@ class RuleResult(Frozen):
     evidence: tuple[Evidence, ...] = ()
 
 
+class CaseVerdict(Frozen):
+    """The final answer for one student: the overall outcome plus every result behind it."""
+
+    outcome: Outcome
+    summary: str
+    results: tuple[RuleResult, ...]
+
+    @property
+    def failures(self) -> tuple[RuleResult, ...]:
+        return tuple(r for r in self.results if r.outcome is Outcome.FAIL)
+
+    @property
+    def flags(self) -> tuple[RuleResult, ...]:
+        return tuple(r for r in self.results if r.outcome is Outcome.FLAG)
+
+
 def worst(outcomes: Iterable[Outcome]) -> Outcome:
     """Rulebook section 6: any FAIL -> FAIL, else any FLAG -> FLAG, else PASS."""
     return max(outcomes, key=lambda o: o.severity, default=Outcome.PASS)
