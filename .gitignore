@@ -12,3 +12,6 @@ DIFFERENT KIND OF SIMMILAR THINGS/
 *.jpg
 *.jpeg
 *.png
+
+# OCR results of real documents: personal data, never commit
+ocr_output/
