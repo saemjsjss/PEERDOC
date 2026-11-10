@@ -1,0 +1,20 @@
+[project]
+name = "hklv-rules"
+version = "0.1.0"
+description = "HKLV document verification: Pass 2 anchors and Pass 3 Rulebook v2.5 rules engine"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.7,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Real applicant documents: personal data, never commit
+SAMPLE DOC/
+DIFFERENT KIND OF SIMMILAR THINGS/
+*.pdf
+*.jpg
+*.jpeg
+*.png
