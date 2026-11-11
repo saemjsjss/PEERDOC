@@ -56,6 +56,33 @@ def parse_date(text: str) -> date | None:
     return found.pop() if len(found) == 1 else None
 
 
+_MONTH_WORD = re.compile(r"\b(?:" + _MONTH_RE + r")[A-Z]*\b", re.IGNORECASE)
+
+
+def has_month_name(text: str) -> bool:
+    """'8th May, 2006', 'Fifth August Two Thousand One': the month is written as a word."""
+    return bool(_MONTH_WORD.search(text))
+
+
+def parse_boxed_date(text: str) -> date | None:
+    """A date written one or two digits per box: '08 05 2006', '0 8 0 5 2 0 0 6', '08052006'.
+
+    Only for a value already found after a date label, and only if it is exactly eight
+    digits. Day-first (DDMMYYYY) as every Bangladeshi form; YYYYMMDD only when that is the
+    sole valid reading. If both read as different valid dates, nothing is returned.
+    """
+    if not re.fullmatch(r"[\d\s]+", text or ""):
+        return None
+    d = re.sub(r"\s", "", text)
+    if len(d) != 8:
+        return None
+    day_first = _make(int(d[4:]), int(d[2:4]), int(d[:2])) if 1900 <= int(d[4:]) <= 2100 else None
+    year_first = _make(int(d[:4]), int(d[4:6]), int(d[6:])) if 1900 <= int(d[:4]) <= 2100 else None
+    if day_first and year_first and day_first != year_first:
+        return None
+    return day_first or year_first
+
+
 # --- dates written in words: "Fifth August Two Thousand" (SSC/HSC certificates) ---------
 
 _ORDINALS = {
@@ -106,7 +133,8 @@ _WORDS_DATE = re.compile(
 
 def parse_words_date(text: str) -> date | None:
     """A date written out in words; None unless it parses completely."""
-    m = _WORDS_DATE.search(re.sub(r"\s+", " ", text))
+    # "Twenty-Fifth", "Thirty - First": without this the match starts at "Fifth" / "First".
+    m = _WORDS_DATE.search(re.sub(r"\s+", " ", re.sub(r"\s*-\s*", " ", text)))
     if not m:
         return None
     day = _ORDINALS.get(re.sub(r"\s+", " ", m.group(1).strip().lower()))

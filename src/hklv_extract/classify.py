@@ -61,6 +61,10 @@ SIG = {
     "apostille": _rx(r"\bE-?\s?APOSTILLE\b", r"\bAPOSTILLE\b", r"Convention de La Haye"),
     "nid": _rx(r"NATIONAL\s*ID(?:ENTITY)?\s*CARD", r"\bNID\s*(?:NO|NUMBER|CARD)\b", r"জাতীয়\s*পরিচয়\s*পত্র"),
     "birth": _rx(r"BIRTH\s*REGISTRATION\s*(?:NUMBER|NO)", r"\bBDRIS\b", r"জন্ম\s*নিবন্ধন"),
+    # Older City Corporation / Pourashava certificates (BDR Form-3, titled "Birth Registration
+    # Certificate" in a decorative font OCR often garbles): see OLD_STYLE_BIRTH below.
+    "birth_registrar": _rx(r"REGISTRAR\s*OF\s*BIRTH", r"BIRTH\s*(?:AND|&)\s*DEATH\s*REGISTRAR", r"\bBDR\s*FORM\b"),
+    "date_of_birth": _rx(r"DATE\s*OF\s*BIRTH"),
     # Not plain "Death Registration": every BDRIS birth certificate is issued by the
     # "Registrar of Birth and Death".
     "death": _rx(r"DEATH\s*REGISTRATION\s*(?:NUMBER|NO)", r"DEATH\s*CERTIFICATE", r"DATE\s*OF\s*DEATH", r"মৃত্যু\s*নিবন্ধন\s*সনদ"),
@@ -90,6 +94,53 @@ SIG = {
 }
 
 _TX_HEADERS = ("DATE", "DEBIT", "CREDIT", "BALANCE")
+
+# Fields only the birth register prints (BDR Form-3). "Place of Birth" is not one: cover
+# letters, application forms and citizenship certificates print it too.
+# Each with its value: an application form's blank office-use labels don't count.
+_REGISTER_FIELDS = {
+    "Date of Registration": re.compile(
+        r"(?:DATE\s*OF\s*REGISTRATION|REGISTRATION\s*DATE)\s*[:：]?\s*\d{1,2}\s*[/\-.]\s*\d{1,2}\s*[/\-.]\s*\d{2,4}", re.IGNORECASE
+    ),
+    "Register No": re.compile(r"\bREGISTER\s*NO\.?\s*[:：]?\s*\d", re.IGNORECASE),
+    "Order of Child": re.compile(r"ORDER\s*OF\s*CHILD\s*[:：]?\s*\d", re.IGNORECASE),
+}
+# Other documents that can carry the registrar's name (the Union Parishad chairman is also
+# the birth and death registrar), a date of birth and a register serial.
+_NOT_A_BIRTH_CERTIFICATE = re.compile(
+    r"CITIZENSHIP|CHARACTER\s*CERTIFICATE|WARISH|\bHEIRS?\b|SUCCESSION|APPLICATION|APPLICANT|FOR\s*OFFICE\s*USE",
+    re.IGNORECASE,
+)
+_BRN_LABEL = re.compile(r"\b(?:BR\s*(?:NUMBER|NO)|BRN)\b", re.IGNORECASE)
+_BRN_DIGITS = re.compile(r"[^0-9]{0,15}\d(?:\s?\d){15,16}(?!\s?\d)")
+_PARENT = re.compile(r"\b(?:FATHER|MOTHER|PARENT)", re.IGNORECASE)
+
+
+def _has_own_brn(text: str) -> bool:
+    """A real 16-17 digit number after "BR Number"/"BRN", and no "NID" right beside the
+    label: a combined identity field ("NID/BRN", "BRN/NID", "NID or BRN", "NID No. (BRN)")
+    is on citizenship and character certificates and cover letters, not on a birth
+    certificate's own number."""
+    return own_brn(text) is not None
+
+
+def own_brn(text: str) -> str | None:
+    """The page's own registration number: the digits after "BR Number"/"BRN"/"Birth
+    Registration Number", not a parent's ("Father's BRN") or a combined NID field."""
+    for m in _OWN_BRN_LABEL.finditer(text):
+        beside = text[max(0, m.start() - 12) : m.end() + 12]
+        if re.search(r"\bNID\b", beside, re.IGNORECASE) or _PARENT.search(text[max(0, m.start() - 25) : m.start()]):
+            continue
+        digits = _BRN_DIGITS.match(text, m.end())
+        if digits:
+            return re.sub(r"\D", "", digits.group(0))
+    return None
+
+
+_OWN_BRN_LABEL = re.compile(r"\b(?:BR\s*(?:NUMBER|NO)|BRN|BIRTH\s*REGISTRATION\s*(?:NUMBER|NO))\b", re.IGNORECASE)
+
+
+OLD_STYLE_BIRTH = "birth registrar office + Date of Birth + "
 
 
 def _has_transaction_table(page: PageReading) -> bool:
@@ -132,6 +183,17 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.BIRTH_CERTIFICATE, "Birth Registration Number / BDRIS")
     if has["frc"] and has["frc_issuer"]:
         return out(PageKind.FRC, "Family certificate + local-government issuer")
+    # After the FRC (a family certificate may list members' BRNs and dates of birth). The
+    # registrar office, a date of birth, and two fields of the birth register, at least one
+    # of them a register entry (Register No, Date of Registration, Order of Child); the
+    # certificate's own BR number counts as the other. Citizenship certificates, cover
+    # letters and checklists carry none of the register entries.
+    if has["birth_registrar"] and has["date_of_birth"] and not _NOT_A_BIRTH_CERTIFICATE.search(text):
+        fields = [name for name, rx in _REGISTER_FIELDS.items() if rx.search(text)]
+        if fields and _has_own_brn(text):
+            fields.append("BR Number")
+        if len(fields) >= 2:
+            return out(PageKind.BIRTH_CERTIFICATE, OLD_STYLE_BIRTH + ", ".join(fields))
     if has["challan"]:
         return out(PageKind.TAX_CHALLAN, "Challan form")
     if has["tax_ack"]:

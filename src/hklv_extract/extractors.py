@@ -12,17 +12,17 @@ from itertools import permutations
 from collections.abc import Callable, Sequence
 from datetime import date
 
-from hklv_ocr.reading import PageReading
+from hklv_ocr.reading import PageReading, TextLine
 from hklv_rules.models import documents as m
 from hklv_rules.models.common import Extracted, NotaryInfo, Person
 
 from .classify import PageKind
 from .common_fields import document_language, has_translation, notary_info, page_language
 from .confidence import AGREE_CAP, DISAGREE, MRZ_INVALID, MRZ_VALID, SINGLE_READER_FACTOR, VL_ONLY, date_field, derived, score_text, text_field
-from .dates import parse_date, parse_words_date
+from .dates import has_month_name, parse_boxed_date, parse_date, parse_words_date
 from .group import PageGroup
 from .mrz import MrzResult
-from .text import Found, as_lines_page, clean_value, find_labeled, reading_order, squash
+from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labeled, levenshtein, reading_order, same_row, squash
 
 NAME = r"[A-Za-z][A-Za-z .\-']{1,60}"
 # Labels that often follow a name on the same printed line.
@@ -73,11 +73,16 @@ def _text(group: PageGroup, labels: Sequence[str], pattern: str, pages: Sequence
 DATE_VALUE = r".{0,30}\d{4}.{0,15}"
 
 
-def _date(group: PageGroup, labels: Sequence[str], pages: Sequence[PageReading] | None = None) -> Extracted[date]:
+def _date(
+    group: PageGroup, labels: Sequence[str], pages: Sequence[PageReading] | None = None, *, boxed: bool = False
+) -> Extracted[date]:
+    """`boxed`: also read eight digits written one or two per box ('08 05 2006'). Only for
+    fields printed that way (a birth certificate's date of birth): elsewhere an 8-digit ID
+    on the line after a date label could form a valid date."""
     found, page = _first(group, lambda p: find_labeled(p, labels, value_pattern=DATE_VALUE), pages)
     if found is None:
         return Extracted[date]()
-    d = parse_date(found.value)
+    d = parse_date(found.value) or (parse_boxed_date(found.value) if boxed else None)
     if d is None:
         return Extracted[date]()
     return date_field(d, score_text(found, page), found.page_no)
@@ -167,6 +172,253 @@ def _tables(page: PageReading) -> list[list[list[str]]]:
             rows.append([clean_value(html.unescape(re.sub(r"<[^>]+>", " ", c))) for c in cells])
         out.append(rows)
     return out
+
+
+MAX_SPAN = 50  # a rowspan/colspan larger than this is an OCR artefact, not a real table
+
+
+def _span(attrs: str, name: str) -> int:
+    mt = re.search(name + r"""\s*=\s*["']?(\d{1,6})""", attrs, re.IGNORECASE)
+    return max(1, min(int(mt.group(1)), MAX_SPAN)) if mt else 1
+
+
+def _table_grid(table_html: str) -> list[list[str | None]]:
+    """One VL table as a full grid of cell texts.
+
+    A merged cell (rowspan/colspan) fills every slot it covers, so index j is the same
+    column in every row. Without this, a header cell spanning two rows ("Sl. No.") shifts
+    the next header row one place left of the data rows beneath it. A slot no cell covers
+    is None: a row with a missing cell is then shorter than its header row.
+    """
+    grid: dict[tuple[int, int], str] = {}
+    for r, tr in enumerate(re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, re.IGNORECASE | re.DOTALL)):
+        c = 0
+        for attrs, raw in re.findall(r"<t[dh]([^>]*)>(.*?)</t[dh]>", tr, re.IGNORECASE | re.DOTALL):
+            while (r, c) in grid:
+                c += 1
+            text = clean_value(html.unescape(re.sub(r"<[^>]+>", " ", raw)))
+            rows, cols = _span(attrs, "rowspan"), _span(attrs, "colspan")
+            for dr in range(rows):
+                for dc in range(cols):
+                    grid.setdefault((r + dr, c + dc), text)
+            c += cols
+    if not grid:
+        return []
+    n_rows, n_cols = max(r for r, _ in grid) + 1, max(c for _, c in grid) + 1
+    return [[grid.get((r, c)) for c in range(n_cols)] for r in range(n_rows)]
+
+
+def _header_re(labels: Sequence[str]) -> re.Pattern[str]:
+    """The whole cell or line is the label (a column header), not 'Label: value'."""
+    return re.compile(r"(?:" + "|".join(labels) + r")\s*[:：]?", re.IGNORECASE)
+
+
+def _compact(value: str) -> str:
+    """'0123 4567 890' -> '01234567890': a numeric value without spaces, as _text gives it."""
+    return re.sub(r"\s+", "", value) if re.fullmatch(r"[\d\s\-/]+", value) else value
+
+
+def _digits(value: str) -> str:
+    return re.sub(r"\D", "", value)
+
+
+def _digit_runs(text: str) -> set[str]:
+    """Every whole number written in `text`, as digits only: runs joined by dashes, and runs
+    joined by dashes or spaces. A number is never matched inside a longer one, so
+    '123456789012' is not in '0123456789012'."""
+    runs = re.findall(r"\d[\d\-]*\d|\d", text) + re.findall(r"\d[\d \-]*\d", text)
+    return {_digits(r) for r in runs}
+
+
+def _near_number(target: str, text: str) -> bool:
+    """Another reader wrote a number one or two digits away from `target` (a misread)."""
+    return any(
+        abs(len(run) - len(target)) <= 2 and levenshtein(run, target, limit=2) <= 2
+        for run in _digit_runs(text)
+        if run != target and len(run) >= 4
+    )
+
+
+COLUMN_MAX_DROP_PX = 600  # header -> its value further down the same column (300 dpi)
+COLUMN_ONE_READER = VL_ONLY  # a column value only one reader's structure gives: FLAG
+# A value only the fallback lookups added for layouts the label lookups can't read (a
+# details-table column, a "BR Number" row, a boxed or in-words date of birth) is evidence
+# for the reviewer, never confident on its own: each has layouts where it reads another
+# field confidently (a second account, a parent's number, a registration date), and a
+# confident wrong value FAILs a correct case where a missing one only FLAGs.
+FALLBACK_MAX = VL_ONLY
+
+# A header row with any of these is a transaction / transfer table: its "Account Number"
+# column holds the other party's account, never the holder's.
+_TX_WORDS = re.compile(
+    r"DEBIT|CREDIT|WITHDRAW|DEPOSIT|PARTICULARS|NARRATION|DESCRIPTION|CHEQUE|\bCHQ\b"
+    r"|TRANSACTION|\bTXN\b|VALUE\s*DATE|REMARKS|BENEFICIARY|COUNTERPARTY|\bDR\b|\bCR\b",
+    re.IGNORECASE,
+)
+
+
+# Six or more digits, possibly grouped by single spaces or dashes: account-sized.
+_LONG_RUN = re.compile(r"\d(?:[\s\-]?\d){5,}")
+# "1 0123456789012": a row's serial number read together with the account number, by one
+# reader or by both alike (a narrow Sl. No. column). Never taken as an account number.
+_JOINED_SERIAL = re.compile(r"\d{1,2}\s+\d(?:[\s\-]?\d){5,}")
+
+
+def _in_tx_header_row(h: TextLine, lines: Sequence[TextLine]) -> bool:
+    """A transaction word on any line overlapping the header's height. Not same_row: wrapped
+    headers ('Particulars of / Transaction') sit half a line above and below it."""
+    return any(
+        ln is not h and ln.box[1] < h.box[3] and ln.box[3] > h.box[1] and _TX_WORDS.search(ln.text) for ln in lines
+    )
+
+
+def _column_line(page: PageReading, labels: Sequence[str], pattern: str) -> TextLine | None:
+    """PP-OCRv6: the line right under a header line that is exactly the label.
+
+    Strict, because a wrong number read confidently FAILs a correct case while a missing
+    one only FLAGs. None when the line under the header is not wholly a number, reaches
+    outside the header's column (it was joined with a neighbouring cell), is followed
+    closely by more digits (the number wrapped onto a second line), or when the column
+    holds another, different number further down (a second account, or another field).
+    """
+    header_re, value_re = _header_re(labels), re.compile(pattern)
+    picked: list[TextLine] = []
+    for h in page.lines:
+        if not header_re.fullmatch(clean_value(h.text)):
+            continue
+        if _in_tx_header_row(h, page.lines):
+            continue  # a transaction table's header row
+        half = (h.box[2] - h.box[0]) / 2
+        lo, hi = h.box[0] - half, h.box[2] + half
+        below = sorted(
+            (
+                ln
+                for ln in page.lines
+                if ln is not h
+                and h.box[3] - 5 <= ln.box[1] <= h.box[3] + COLUMN_MAX_DROP_PX
+                and lo <= (ln.box[0] + ln.box[2]) / 2 <= hi
+            ),
+            key=lambda ln: ln.box[1],
+        )
+        # The cell right under the header: the first line overlapping the header's own width.
+        # A narrow neighbouring column's cell (the serial "1") can sit inside the band.
+        first = next((ln for ln in below if ln.box[0] < h.box[2] and ln.box[2] > h.box[0]), None)
+        if first is None:
+            continue
+        rest = [ln for ln in below if ln is not first]
+        if not value_re.fullmatch(clean_value(first.text)) or first.box[0] < lo or first.box[2] > hi:
+            return None
+        if _JOINED_SERIAL.fullmatch(clean_value(first.text)):
+            return None
+        height = max(1, first.box[3] - first.box[1])
+        x0, x1 = first.box[0], first.box[2]
+        # Digits starting within a line height under it, overlapping it: a wrapped number.
+        if any(re.search(r"\d", ln.text) and ln.box[1] - first.box[3] <= height and ln.box[0] < x1 and ln.box[2] > x0 for ln in rest):
+            return None
+        # Any other account-sized number in the column, even inside a line OCR joined with a
+        # neighbouring cell ("2 0987654321098"): a second account, or another field. The
+        # letter's own text below ("Exchange Rate: 124.25 ...", "Date: 29.10.2026") has none.
+        mine = _digits(first.text)
+        if any(_digits(run) != mine for ln in rest for run in _LONG_RUN.findall(ln.text)):
+            return None
+        picked.append(first)
+    return picked[0] if picked and len({_digits(ln.text) for ln in picked}) == 1 else None
+
+
+def _column_cell(page: PageReading, labels: Sequence[str], pattern: str) -> tuple[str, str | None]:
+    """PaddleOCR-VL: the number in the table column under a header cell that is exactly the
+    label.
+
+    ('none', None): no VL table has that header. ('tx', None): it is only in a transaction
+    table's header row (the other party's account). ('value', v): every digit-bearing cell in
+    the column is that same number. ('unclear', None): the header is there but the column
+    decides nothing: several different numbers, a masked or partial one, no number, or a
+    row that does not line up with the header row (a missing, extra or unclosed cell, a
+    nested table), where a neighbouring column's value may sit under the header.
+    """
+    header_re, value_re = _header_re(labels), re.compile(pattern)
+    found_header = in_tx = False
+    values: list[str] = []
+    for b in page.blocks:
+        if b.label != "table" or "<tr" not in b.text.lower():
+            continue
+        nested = b.text.lower().count("<table") > 1
+        grid = _table_grid(b.text)
+        for i, row in enumerate(grid):
+            for j, cell in enumerate(row):
+                if cell is None or not header_re.fullmatch(cell):
+                    continue
+                if any(c and _TX_WORDS.search(c) for c in row):
+                    in_tx = True
+                    continue  # a transaction table's header row
+                found_header = True
+                width = sum(c is not None for c in row)
+                for r in grid[i + 1 :]:
+                    if nested or sum(c is not None for c in r) != width:
+                        return ("unclear", None)
+                    below = r[j]
+                    if below is None or below == cell or not re.search(r"\d", below):
+                        continue  # the header repeated by a rowspan, an empty or text cell
+                    if not value_re.fullmatch(below) or _JOINED_SERIAL.fullmatch(below):
+                        return ("unclear", None)
+                    values.append(_compact(below))
+    if not found_header:
+        return ("tx", None) if in_tx else ("none", None)
+    if values and len({_digits(v) for v in values}) == 1:
+        return ("value", values[0])
+    return ("unclear", None)
+
+
+# Wholly a numeric date ("05-10-2026", "2026-10-05"): an Open Date cell, not an account.
+_WHOLE_DATE = re.compile(r"\d{1,2}\s*[/\-.]\s*\d{1,2}\s*[/\-.]\s*(?:19|20)\d{2}|(?:19|20)\d{2}-\d{2}-\d{2}")
+_ACCOUNT_WORD = re.compile(r"\bA\s*/?\s*C\b|ACCOUNT", re.IGNORECASE)
+
+
+def _other_account_in_text(page: PageReading, target: str) -> bool:
+    """A line that speaks of an account ("Savings A/C # 1501...") and carries a different
+    10+ digit number: the table's number may be another of the holder's accounts (an FDR)."""
+    return any(
+        _ACCOUNT_WORD.search(ln.text) and len(_digits(run)) >= 10 and _digits(run) != target
+        for ln in page.lines
+        for run in _LONG_RUN.findall(ln.text)
+    )
+
+
+def _column_number(page: PageReading, labels: Sequence[str], pattern: str) -> Extracted[str] | None:
+    """A number under its column header (a details table), scored by exact digit agreement.
+
+    Confident only when PP-OCRv6's line under the header and PaddleOCR-VL's cell under the
+    same header give exactly the same digits. A VL column that is unclear, or different
+    digits -> DISAGREE. One reader's column alone is never confident (COLUMN_ONE_READER):
+    PP-OCRv6's column geometry is fooled by joined or wrapped lines, VL's cells shift when
+    it merges or drops one, and the same number elsewhere on the page says nothing about
+    which column it was in. Below the threshold the rules engine FLAGs; it never FAILs.
+    """
+    line = _column_line(page, labels, pattern)
+    status, cell = _column_cell(page, labels, pattern)
+    if line is not None and parse_date(line.text) is not None:
+        line = None  # an Open Date cell, not an account number
+    if cell is not None and parse_date(cell) is not None:
+        status, cell = "unclear", None
+    if status == "tx":
+        return None  # VL saw the header in a transaction table: whatever PP-OCRv6 found is too
+    if line is not None:
+        value = _compact(clean_value(line.text))
+        target = _digits(value)
+        if status == "value" and _other_account_in_text(page, target):
+            conf = DISAGREE  # the letter names another account: which one is the holder's?
+        elif status == "value":
+            conf = min(line.score, AGREE_CAP) if _digits(cell or "") == target else DISAGREE
+        elif status == "unclear" or _near_number(target, page.block_text):
+            conf = DISAGREE
+        else:
+            conf = COLUMN_ONE_READER
+        return Extracted[str](value=value, confidence=round(min(conf, FALLBACK_MAX), 4), source_page=page.page_no)
+    if status == "value" and cell is not None:
+        target = _digits(cell)
+        conf = DISAGREE if any(_near_number(target, ln.text) for ln in page.lines) else COLUMN_ONE_READER
+        return Extracted[str](value=cell, confidence=round(min(conf, FALLBACK_MAX), 4), source_page=page.page_no)
+    return None
 
 
 def _line_found(page: PageReading, value: str) -> Found | None:
@@ -277,14 +529,142 @@ def nid(group: PageGroup, doc_id: str) -> m.NationalId:
     )
 
 
+# "BR Number" on older City Corporation certificates (BDR Form-3). The value is 16-20
+# digits, possibly one per box with spaces between ("2 0 0 6 ..."), and is never cut out of
+# a longer run of digits.
+# Never a parent's field ("Father's BR No.", "Mother's Birth Registration No"): if the
+# child's own boxes don't read, the lookup must not move on to the parent's number.
+_NOT_PARENT = "".join(f"(?<!{p} )" for p in ("Father's", "Fathers", "Father", "Mother's", "Mothers", "Mother", "Parent's", "Parents"))
+BRN_LABELS = [
+    _NOT_PARENT + r"Birth\s*Registration\s*(?:Number|No)\.?",
+    _NOT_PARENT + r"(?<!Birth )Registration\s*No\.?",
+    _NOT_PARENT + r"BR\s*(?:Number|No)\.?",
+]
+BRN_VALUE = r"\d(?:\s?\d){15,16}(?!\s?\d)"  # exactly 16-17 digits, never cut from a longer run
+# The lookup as before these forms were added, tried first and unchanged.
+_BRN_LABELS_V1 = [r"Birth\s*Registration\s*(?:Number|No)\.?", r"Registration\s*No\.?"]
+_BRN_VALUE_V1 = r"\d[\d ]{15,20}\d"
+
+
+def _registration_number(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[str]:
+    brn = _text(group, _BRN_LABELS_V1, _BRN_VALUE_V1, pages=pages)
+    if brn.value is not None:
+        return brn
+    # The child's own field is printed first, above the parents'. Only that first label is
+    # used, and only if nothing on its line or row names a parent; the lookup never moves on
+    # to a later label (a parent's "BR No", a parents' grid row) when the child's boxes fail.
+    # PP-OCRv6's lines only: PaddleOCR-VL's text still holds the parents' fields.
+    for p in pages:
+        lines = reading_order(p.lines)
+        first = next((ln for ln in lines if _ANY_BRN_LABEL.search(_plain(ln.text))), None)
+        if first is None:
+            continue
+        row = [first, *(o for o in lines if o is not first and same_row(first, o))]
+        if any(_PARENT_WORD.search(_plain(o.text)) for o in row):
+            return Extracted[str]()
+        # The child's label line and the boxes after it on its row: never a line below (the
+        # parents' numbers follow there).
+        found = find_labeled(_label_row_only(p, _ANY_BRN_LABEL), BRN_LABELS, value_pattern=BRN_VALUE)
+        if found is None:
+            return Extracted[str]()
+        brn = text_field(Found(_compact(found.value), found.score, found.page_no), p)
+        return brn.model_copy(update={"confidence": min(brn.confidence, FALLBACK_MAX)})
+    return Extracted[str]()
+
+
+# Any registration-number label, a parent's included (to find and set aside the parents').
+_ANY_BRN_LABEL = re.compile(r"Birth\s*Registration\s*(?:Number|No)|Registration\s*No|\bBR\s*(?:Number|No)\b", re.IGNORECASE)
+
+
+_IN_WORDS = re.compile(r"\bIn\s*Words?\s*[:：\-]?\s*(.+)$", re.IGNORECASE)
+_IN_WORDS_LABEL = re.compile(r"In\s*Words?\s*[:：\-]?", re.IGNORECASE)
+# A date of birth read only from the "In Word" line is evidence for the reviewer, never
+# confident: wrapped, misspelt or partly read words still parse to a valid, different date
+# ("Two Thousand / Six" -> 2000), and nothing else on the page confirms it.
+IN_WORDS_MAX = VL_ONLY
+# The next field's label on the same line. Known words only: a pattern for "any words before
+# a colon" would cut "... Two Thousand One  Date of ...:" after "Two Thousand" (year 2000).
+_NEXT_FIELD = re.compile(
+    r"\s+(?=(?:Date|Sex|Gender|Order|Place|Registration|Register|Issue|Issuance|Issued|Father|Mother|Name|Permanent|Address|BRN?|NID)\b[^:：]{0,30}[:：])",
+    re.IGNORECASE,
+)
+_STARTS_WITH_LABEL = re.compile(r"[A-Za-z][A-Za-z.' ]{0,30}[:：]")
+
+
+_DOB_LABEL = re.compile(r"Date\s*of\s*Birth", re.IGNORECASE)
+_PARENT_WORD = re.compile(r"\b(?:Father|Mother|Parent)", re.IGNORECASE)
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[’‘`´]", "'", text)
+
+
+def _label_row_only(page: PageReading, label: re.Pattern[str]) -> PageReading:
+    """The page cut down to the first line carrying `label` and the boxes after it on its
+    row, up to the next field (a box with letters in it: "Date of Registration:", a
+    second column). A value looked up there can't come from another field. PaddleOCR-VL's
+    text is left out too: a lookup falling back to it would search the whole page again."""
+    lines = reading_order(page.lines)
+    first = next((ln for ln in lines if label.search(_plain(ln.text))), None)
+    if first is None:
+        return page.model_copy(update={"lines": (), "blocks": ()})
+    keep = [first]
+    for o in sorted((o for o in lines if o is not first and same_row(first, o) and o.box[0] >= first.box[2] - 10), key=lambda o: o.box[0]):
+        if re.search(r"[A-Za-z]", o.text):
+            break
+        keep.append(o)
+    return page.model_copy(update={"lines": tuple(keep), "blocks": ()})
+
+
+def _birth_date(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[date]:
+    """'Date of Birth' (also one digit per box); else the certificate's own 'In Word: 8th
+    May, 2006' / 'In Word: Fifth August Two Thousand One' line. Only that line: the lines
+    near it are other dates (registration, issue)."""
+    dob = _date(group, [r"Date\s*of\s*Birth"], pages=pages)
+    if dob.value is not None:
+        return dob
+    boxed = _date(group, [r"Date\s*of\s*Birth"], pages=[_label_row_only(p, _DOB_LABEL) for p in pages], boxed=True)
+    if boxed.value is not None:
+        return boxed.model_copy(update={"confidence": min(boxed.confidence, FALLBACK_MAX)})
+    for page in pages:
+        for ln in page.lines:
+            mt = _IN_WORDS.search(ln.text)
+            score = ln.score
+            if mt and not _IN_WORDS_LABEL.fullmatch(ln.text.strip()):
+                value = clean_value(mt.group(1))
+            elif _IN_WORDS_LABEL.fullmatch(ln.text.strip()):
+                # The label in a box of its own: its value is the nearest box to its right on
+                # the same row. Further right is the certificate's other column.
+                right = sorted((o for o in page.lines if o is not ln and o.box[0] >= ln.box[2] - 10 and same_row(ln, o)), key=lambda o: o.box[0])
+                if not right or right[0].box[0] - ln.box[2] > ROW_FIRST_GAP_PX:
+                    continue
+                value, score = clean_value(right[0].text), min(ln.score, right[0].score)
+            else:
+                continue
+            if _STARTS_WITH_LABEL.match(value):
+                continue  # another field's box ("Date of Issuance: ..."), not this one's value
+            # Stop at the next field on the same line ("... Date of Registration: 12/09/2001").
+            value = _NEXT_FIELD.split(value, maxsplit=1)[0].strip()
+            if not has_month_name(value):
+                continue  # a date in words always names its month
+            numeric, words = (parse_date(value), parse_words_date(value)) if value else (None, None)
+            if numeric and words and numeric != words:
+                continue  # two different dates: not chosen between
+            d = numeric or words
+            if d is not None:
+                conf = min(score_text(Found(value, score, page.page_no), page), IN_WORDS_MAX)
+                return date_field(d, conf, page.page_no)
+    return dob
+
+
 def birth_certificate(group: PageGroup, doc_id: str) -> m.BirthCertificate:
     english = [p for p in group.pages if page_language(p).value == "ENGLISH"] or group.pages
     return m.BirthCertificate(
         doc_id=doc_id,
         pages=group.page_nos,
-        registration_number=_text(group, [r"Birth\s*Registration\s*(?:Number|No)\.?", r"Registration\s*No\.?"], r"\d[\d ]{15,20}\d", pages=english),
+        registration_number=_registration_number(group, english),
         name=_name(group, [r"(?<!Father's )(?<!Mother's )Name(?:\s*of\s*(?:the\s*)?Child)?"], pages=english),
-        date_of_birth=_date(group, [r"Date\s*of\s*Birth"], pages=english),
+        date_of_birth=_birth_date(group, english),
         father_name=_name(group, [r"Father'?s?\s*Name"], pages=english),
         mother_name=_name(group, [r"Mother'?s?\s*Name"], pages=english),
         language=document_language(group.pages),
@@ -419,6 +799,44 @@ ACCOUNT_NO = r"[0-9][0-9 \-]{5,24}[0-9]"
 ACCOUNT_LABELS = [r"A/?C\.?\s*(?:No|Number)\.?", r"Account\s*(?:No|Number)\.?"]
 
 
+_ACCOUNT_FIELD = re.compile(
+    r"(?:^|\b)(?:" + "|".join(ACCOUNT_LABELS) + r")\s*"
+    r"(?:[:：]\s*(?![\d\s\-]{6,})[^\s\d]|[:：\-.]?\s*(?=[\dXx*•\s\-]*[Xx*•]{3})[\dXx*•][\dXx*•\s\-]{4,})",
+    re.IGNORECASE,
+)
+
+
+def _account_field_unreadable(group: PageGroup) -> bool:
+    """'Account No: XXXXXXXX7001' (masked) or 'A/C No: <unreadable>': the holder's number is
+    printed as a field but could not be read. Then a number from some table on the page
+    is not taken instead (it may be another account); the field stays empty: FLAG."""
+    texts = [ln.text for p in group.pages for ln in p.lines] + [
+        t for p in group.pages for t in p.block_text.splitlines()
+    ]
+    return any(_ACCOUNT_FIELD.search(re.sub(r"<[^>]+>", " ", t)) for t in texts)
+
+
+def _account_number(group: PageGroup) -> Extracted[str]:
+    """The labelled lookup exactly as before ('A/C No: 0123...', the number beside or under
+    the label), except that a date ("05-10-2026", an Open Date cell under a header row) is
+    never an account number.
+
+    Only when that finds nothing, and the holder's field is not printed masked or
+    unreadable, a details table with an 'Account Number' column header is read; there only
+    both readers agreeing under that header is confident (_column_number).
+    """
+    found, page = _first(group, lambda p: find_labeled(p, ACCOUNT_LABELS, value_pattern=ACCOUNT_NO))
+    if found is not None and page is not None and not _WHOLE_DATE.fullmatch(clean_value(found.value)):
+        return text_field(Found(_compact(found.value), found.score, found.page_no), page)
+    if _account_field_unreadable(group):
+        return Extracted[str]()
+    for p in group.pages:
+        column = _column_number(p, ACCOUNT_LABELS, ACCOUNT_NO)
+        if column is not None:
+            return column
+    return Extracted[str]()
+
+
 def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
     """'This is to certify that ABDUL KARIM, Son of ...' -> ABDUL KARIM.
 
@@ -447,7 +865,7 @@ def bank_solvency(group: PageGroup, doc_id: str) -> m.BankSolvency:
         doc_id=doc_id,
         pages=group.page_nos,
         account_holder=holder,
-        account_number=_text(group, ACCOUNT_LABELS, ACCOUNT_NO),
+        account_number=_account_number(group),
         letter_date=_date(group, [r"Date", r"Dated"]),
     )
 
@@ -457,7 +875,7 @@ def bank_statement(group: PageGroup, doc_id: str) -> m.BankStatement:
         doc_id=doc_id,
         pages=group.page_nos,
         account_holder=_name(group, [r"Account\s*Name", r"A/?C\s*Name", r"Customer\s*Name", r"Account\s*Holder", r"Name"]),
-        account_number=_text(group, ACCOUNT_LABELS, ACCOUNT_NO),
+        account_number=_account_number(group),
         statement_date=_date(group, [r"Generation\s*Date", r"Generated\s*(?:on|Date)", r"As\s*on", r"Print(?:ing)?\s*Date", r"Printed\s*on", r"Statement\s*Date"]),
     )
 

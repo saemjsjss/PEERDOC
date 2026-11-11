@@ -90,7 +90,26 @@ The same words recur across document types, so the order of checks is part of th
    "Date of Death": every BDRIS birth certificate is issued by the "Registrar of Birth and
    Death".
 6. Birth, FRC, tax challan / acknowledgement / certificate, **TIN before "Return of Income"**
-   (a TIN certificate tells the taxpayer to file one).
+   (a TIN certificate tells the taxpayer to file one). Birth: "Birth Registration
+   Number/No", BDRIS or the Bangla title. Older City Corporation certificates (BDR Form-3)
+   are recognised **after the FRC check** by the birth registrar office ("Office of the
+   Birth and Death Registrar", "BDR Form") + "Date of Birth" + two fields of the birth
+   register, at least one a register entry ("Register No", "Date of Registration",
+   "Order of Child"); the other may be the certificate's own 16-17 digit number after
+   "BR Number"/"BRN", counted only with no "NID" beside the label (combined "NID/BRN",
+   "BRN/NID", "NID or BRN" fields are on citizenship certificates and cover letters).
+   "Place of Birth" does not count (letters and forms print it). The decorative title is
+   not used (OCR garbles it, and cover letters, checklists and FRC tables name it too).
+   Each register entry counts only with its value (an application form's blank
+   office-use "Register No.:" does not), a parent's "Father's BRN" is not the page's own,
+   and pages that call themselves something else (citizenship, character, warish/heir,
+   succession certificates, applications) are excluded: the Union Parishad chairman is
+   also the registrar and signs those too. Such a page joins a neighbouring birth
+   certificate page only when both show the same own registration number (its
+   translation); otherwise it is a document of its own (it may be a parent's). Known,
+   unchanged from before: every birth certificate in a case is checked against the
+   student's passport, so a parent's own certificate in the upload FAILs BIRTH-03 (as a
+   parent's BDRIS certificate always did).
 7. NID without MRZ ("National ID Card", "NID No"), last of the identity checks: FRCs, trade
    licences and TINs all print NID numbers.
 8. Bank statement, solvency ("To Whom It May Concern" only together with bank + account
@@ -101,6 +120,17 @@ university's recommendation letter is ignored.
 
 ### Field-finding conventions
 
+**Fallback lookups are evidence, never confident (at most 0.60, FLAG).** Some layouts are
+read by lookups added after the label lookups below: a bank account number from a
+details-table column, a birth registration number after "BR Number", a date of birth
+written in boxes or in words. Each was shown, in twelve rounds of adversarial review,
+to have layouts where it reads another field confidently (a second account, a parent's
+number, a registration date), and a confident wrong value FAILs a correct case where a
+missing one only FLAGs. So the value is shown to the reviewer and the rule FLAGs. These
+lookups run only where the label lookups find nothing; whatever those found before, they
+still find, exactly as before. Raising any of them above 0.60 should wait for evidence
+from real readings.
+
 * Label then value on the same line, on the same row to the right (two-column forms;
   one-digit-per-box numbers are joined), or on the next line. A column far to the right
   is a different field.
@@ -108,8 +138,44 @@ university's recommendation letter is ignored.
   on a trade licence translation), so the value must look like the field (6+ digits).
 * If PP-OCRv6 has no value, PaddleOCR-VL's text is searched the same way; a value only it
   saw scores `VL_ONLY` (0.60, so FLAG).
+* Bank account number: the label lookup above, unchanged, except that a date
+  ("05-10-2026") is never an account number. Known and unchanged (xfail tests): after a
+  table header row read as one line, or a label alone above a row, the label lookup takes
+  the first number-shaped cell on the next line, which can be another column's (a
+  Customer ID) or a serial number joined to the account ("1 0123456789012").
+* Only when the label lookup finds nothing, bank account numbers can also come from a
+  details table whose column header is
+  "Account Number" with the number further down the column (the label lookup only sees
+  the neighbouring headers there). PaddleOCR-VL's table is expanded into a grid with
+  `rowspan`/`colspan` honoured; PP-OCRv6 counts only with the line right under the header,
+  wholly inside the column, not followed by a wrapped piece, and no other number in the
+  column. Several accounts, a masked number or anything unclear give no value (FLAG).
+  A value shaped "1 0123456789012" is a row's serial number read together with the account
+  number (by one reader or both alike) and is never taken.
+  Never from a transaction / transfer table (Debit, Credit, Particulars ... in the header
+  row: its account column is the other party's), and never when the holder's own
+  "Account No:" field is printed but masked (anywhere: "XXXXXXXX7001", "1501XXXXX7001")
+  or unreadable. Not confident when the letter's own text names an account with a
+  different 10+ digit number ("Savings A/C # 1501..."): the table may list another of the
+  holder's accounts (an FDR).
+* "Account holder" in the solvency letter's own sentence keeps "Md"/"Mst": under the name
+  policy "MD X" and "X" are different names. Only Mr/Mrs/Ms are dropped.
 * Academic level = the highest level the page names (a bachelor transcript also says
   "HSC or equivalent").
+* Birth registration number: the lookup above first, unchanged; only if it finds nothing,
+  "BR Number", one digit per box allowed, exactly 16-17 digits, never cut out of a longer
+  run; only the first such label on the page (the child's, printed above the parents'),
+  only if nothing on its row names a parent (any apostrophe), from PP-OCRv6's lines only,
+  and never moving on to a later label. The birth certificate's date of birth may be
+  written in boxes ("08 05 2006"): read only there, as exactly eight digits on the "Date
+  of Birth" line or its row (never the lines below: a registration date; elsewhere an
+  8-digit ID could form a date); its "In Word: 8th
+  May, 2006" (or "Fifth August Two Thousand One") line is the fallback when its boxes
+  don't read; only that line (or, for a label in its own box, the nearest box on its row),
+  cut at the next field's label, and only if it names the month; never the registration or
+  issue date near it. Hyphenated days ("Twenty-Fifth") are read as one number. A date of
+  birth from the In Word line alone is never confident (at most 0.60, FLAG): wrapped or
+  misspelt words still parse to a valid, different date ("Two Thousand / Six" -> 2000).
 * Dates are day-first; two different dates in one field are not chosen between. Board
   certificates spell the date of birth out ("Fifth August Two Thousand"); that is parsed
   only if it parses completely, and checked against the second reader.
@@ -127,6 +193,9 @@ say-so:
 | PP-OCRv6 value also present in PaddleOCR-VL's text of the page | line score, capped at 0.99 |
 | PaddleOCR-VL has a near-miss of the value (1 letter per 5 different) | **0.50**: the readers disagree, so FLAG |
 | PaddleOCR-VL has nothing like it | line score × 0.92 (passes alone only if the line score is ≥ ~0.98) |
+| Account number from a table column: PP-OCRv6's line under the header and PaddleOCR-VL's cell under the same header give exactly the same digits (whole numbers, never one inside a longer one) | 0.60, FLAG (fallback lookup: evidence only, see above) |
+| Account number from a table column: the readers' digits differ, or VL's column is unclear (several numbers, a masked one, a row that doesn't line up with its header) | **0.50**, FLAG |
+| Account number from only one reader's column (PP-OCRv6's line under the header, or PaddleOCR-VL's cell) | 0.60, FLAG: PP-OCRv6's column geometry is fooled by joined or wrapped lines and VL's cells shift when it merges or drops one, so neither is confident alone |
 | Printed name matches the MRZ name (word order ignored) | 0.99 |
 | Seal block whose own ring text (PaddleOCR-VL seal recognition) has a word starting "NOTAR"/"ADVOCAT" | 0.95 (seal shape + the notary's name on it) |
 | Seal block whose ring text says something else (Union Parishad, university, consular seal, emblem) | the layout detector's own score, never boosted |
