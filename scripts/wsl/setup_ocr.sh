@@ -15,6 +15,7 @@ PY_VERSION="3.12"
 PADDLE_VERSION="3.2.1"
 PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu129/"
 PADDLEOCR_SPEC="paddleocr[doc-parser]>=3.6.0"
+ZXING_SPEC="zxing-cpp>=3.1"
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -76,6 +77,9 @@ fi
 
 step "Installing $PADDLEOCR_SPEC"
 python -m pip install -U "$PADDLEOCR_SPEC"
+
+step "Installing ZXing-C++ (QR codes and barcodes)"
+python -m pip install -U "$ZXING_SPEC"
 
 step "Checking PaddlePaddle can use the GPU"
 python - <<'EOF'

@@ -1,0 +1,185 @@
+"""Content-based page classification (Rulebook section 1.1). File names are never used.
+
+Each page gets one kind. Signatures are checked from the most specific to the most
+generic, because generic words recur: every notarised translation says "Notary Public",
+and university letters also say "To Whom It May Concern".
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from datetime import date
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict
+
+from hklv_ocr.reading import PageReading
+
+from .mrz import MrzResult, find_mrz
+from .text import reading_order
+
+
+class PageKind(str, Enum):
+    PASSPORT = "passport"
+    PHOTO = "photo"
+    BIRTH_CERTIFICATE = "birth_certificate"
+    NID = "nid"
+    DEATH_CERTIFICATE = "death_certificate"
+    FRC = "frc"
+    BANK_SOLVENCY = "bank_solvency"
+    BANK_STATEMENT = "bank_statement"
+    TRADE_LICENSE = "trade_license"
+    EMPLOYMENT_CERTIFICATE = "employment_certificate"
+    TIN_CERTIFICATE = "tin_certificate"
+    TAX_CHALLAN = "tax_challan"
+    TAX_ACKNOWLEDGEMENT = "tax_acknowledgement"
+    TAX_CERTIFICATE = "tax_certificate"
+    E_APOSTILLE = "e_apostille"
+    ACADEMIC_CERTIFICATE = "academic_certificate"
+    ACADEMIC_TRANSCRIPT = "academic_transcript"
+    LANGUAGE_TEST = "language_test"
+    AFFIDAVIT = "affidavit"
+    IGNORED = "ignored"  # IGNORE-01: matches no signature
+
+
+class PageClass(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
+
+    page_no: int
+    kind: PageKind
+    reason: str
+    mrz: MrzResult | None = None
+
+
+def _rx(*patterns: str) -> re.Pattern[str]:
+    return re.compile("|".join(patterns), re.IGNORECASE)
+
+
+SIG = {
+    "passport": _rx(r"\bPASSPORT\b", r"পাসপোর্ট"),
+    "apostille": _rx(r"\bE-?\s?APOSTILLE\b", r"\bAPOSTILLE\b", r"Convention de La Haye"),
+    "nid": _rx(r"NATIONAL\s*ID(?:ENTITY)?\s*CARD", r"\bNID\s*(?:NO|NUMBER|CARD)\b", r"জাতীয়\s*পরিচয়\s*পত্র"),
+    "birth": _rx(r"BIRTH\s*REGISTRATION\s*(?:NUMBER|NO)", r"\bBDRIS\b", r"জন্ম\s*নিবন্ধন"),
+    # Not plain "Death Registration": every BDRIS birth certificate is issued by the
+    # "Registrar of Birth and Death".
+    "death": _rx(r"DEATH\s*REGISTRATION\s*(?:NUMBER|NO)", r"DEATH\s*CERTIFICATE", r"DATE\s*OF\s*DEATH", r"মৃত্যু\s*নিবন্ধন\s*সনদ"),
+    "frc": _rx(r"FAMILY\s*RELATIONSHIP\s*CERTIFICATE", r"FAMILY\s*CERTIFICATE", r"ওয়ারিশ"),
+    "frc_issuer": _rx(r"UNION\s*PARI?S(?:H|S)?AD", r"UNION\s*PORISHAD", r"POURASHAVA", r"PAURASHAVA", r"MUNICIPALITY", r"CITY\s*CORPORATION"),
+    "challan": _rx(r"CHALLAN\s*FORM", r"চালান\s*ফরম", r"\bA-?CHALLAN\b"),
+    "tax_ack": _rx(r"ACKNOWLEDGE?MENT\s*RECEIPT"),
+    # TIN certificates also say "file the Return of Income": checked after TIN.
+    "return_of_income": _rx(r"RETURN\s*OF\s*INCOME"),
+    "tax_cert": _rx(r"INCOME\s*TAX\s*CERTIFICATE"),
+    "tin": _rx(r"TAXPAYER'?S?\s*IDENTIFICATION\s*NUMBER", r"\bTIN\s*CERTIFICATE\b"),
+    "nbr": _rx(r"NATIONAL\s*BOARD\s*OF\s*REVENUE", r"\bNBR\b"),
+    # Also the licence's own verification QR (decoded by ZXing), e.g. ".../verify/trade_bn/...".
+    "trade": _rx(r"TRADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E", r"ট্রেড\s*লাইসেন্স", r"/verify/trade"),
+    "employment": _rx(r"EMPLOYMENT\s*CERTIFICATE", r"EXPERIENCE\s*CERTIFICATE", r"\bIS\s+(?:WORKING|EMPLOYED|SERVING)\b"),
+    "solvency": _rx(r"\bSOLVENCY\b", r"ACCOUNT\s*HOLDER"),
+    "to_whom": _rx(r"TO\s*WHOM\s*IT\s*MAY\s*CONCERN"),
+    "bank": _rx(r"\bBANK\b", r"\bBRANCH\b"),
+    "account": _rx(r"\bA/?C\b", r"\bACCOUNT\b"),
+    "statement": _rx(r"STATEMENT\s*OF\s*ACCOUNT", r"ACCOUNT\s*STATEMENT", r"BANK\s*STATEMENT"),
+    "transcript": _rx(r"ACADEMIC\s*TRANSCRIPT", r"\bTRANSCRIPT\b", r"GRADE\s*SHEET", r"MARK\s*SHEET"),
+    "acad_cert": _rx(r"CERTIFICATE\s*EXAMINATION", r"BOARD\s*OF\s*INTERMEDIATE", r"MADRASAH\s*EDUCATION\s*BOARD", r"TECHNICAL\s*EDUCATION\s*BOARD", r"\bUNIVERSITY\b"),
+    "acad_award": _rx(r"\bPASSED\b", r"\bOBTAINED\b", r"\bDEGREE\b", r"\bG\.?P\.?A\b"),
+    "language_test": _rx(r"\bIELTS\b", r"TEST\s*REPORT\s*FORM", r"\bTOPIK\b"),
+    # Strong words only: "Notary Public" is on every notarised translation.
+    "affidavit": _rx(r"\bAFFIDAVIT\b", r"SAME\s+PERSON", r"হলফনামা"),
+}
+
+_TX_HEADERS = ("DATE", "DEBIT", "CREDIT", "BALANCE")
+
+
+def _has_transaction_table(page: PageReading) -> bool:
+    """Bank statement: a table header row with Date, Debit, Credit and Balance."""
+    words = {re.sub(r"[^A-Z]", "", ln.text.upper()) for ln in page.lines}
+    text = page.block_text.upper()
+    in_lines = all(any(h in w for w in words) for h in _TX_HEADERS)
+    in_table = all(h in text for h in _TX_HEADERS) and "<TABLE" in text
+    return in_lines or in_table
+
+
+def classify_page(page: PageReading, today: date) -> PageClass:
+    lines_text = "\n".join(ln.text for ln in reading_order(page.lines))
+    text = "\n".join([lines_text, page.block_text, *(b.text for b in page.barcodes)])
+    has ={k: bool(rx.search(text)) for k, rx in SIG.items()}
+    mrz = next(iter(find_mrz([ln.text for ln in reading_order(page.lines)], today)), None)
+
+    def out(kind: PageKind, reason: str) -> PageClass:
+        return PageClass(page_no=page.page_no, kind=kind, reason=reason, mrz=mrz)
+
+    if page.from_image_file and len(page.lines) < 5:
+        return out(PageKind.PHOTO, "image file with little or no text")
+    if mrz is not None and mrz.format == "TD3" and mrz.document_code.startswith("P"):
+        return out(PageKind.PASSPORT, "passport MRZ (P<)" + (" + PASSPORT" if has["passport"] else ""))
+    if has["apostille"]:
+        return out(PageKind.E_APOSTILLE, "Apostille")
+    # An affidavit lists other documents by name ("Birth Certificate", "Mother's NID"), so it
+    # is recognised before the documents it mentions.
+    if has["affidavit"]:
+        return out(PageKind.AFFIDAVIT, "Affidavit / same person")
+    if mrz is not None and mrz.format == "TD1":
+        return out(PageKind.NID, "ID-card MRZ (I<)")
+    # A trade licence has the owner's birth-registration field; a birth certificate never
+    # mentions a trade licence.
+    if has["trade"]:
+        return out(PageKind.TRADE_LICENSE, "Trade License")
+    if has["death"]:
+        return out(PageKind.DEATH_CERTIFICATE, "Death registration number / certificate")
+    if has["birth"]:
+        return out(PageKind.BIRTH_CERTIFICATE, "Birth Registration Number / BDRIS")
+    if has["frc"] and has["frc_issuer"]:
+        return out(PageKind.FRC, "Family certificate + local-government issuer")
+    if has["challan"]:
+        return out(PageKind.TAX_CHALLAN, "Challan form")
+    if has["tax_ack"]:
+        return out(PageKind.TAX_ACKNOWLEDGEMENT, "Acknowledgement receipt")
+    if has["tax_cert"]:
+        return out(PageKind.TAX_CERTIFICATE, "Income Tax Certificate")
+    if has["tin"] or (has["nbr"] and re.search(r"\bTIN\b", text)):
+        return out(PageKind.TIN_CERTIFICATE, "Taxpayer's Identification Number / NBR")
+    if has["return_of_income"]:
+        return out(PageKind.TAX_ACKNOWLEDGEMENT, "Return of income")
+    # Generic identity words last: FRCs, trade licences and TINs all print NID numbers.
+    if has["nid"]:
+        return out(PageKind.NID, "National ID Card, no MRZ")
+    if has["statement"] or _has_transaction_table(page):
+        return out(PageKind.BANK_STATEMENT, "transaction table (Date/Debit/Credit/Balance)")
+    if has["solvency"] or (has["to_whom"] and has["bank"] and has["account"]):
+        return out(PageKind.BANK_SOLVENCY, "Solvency / account holder letter from a bank")
+    if has["employment"] and not has["acad_cert"]:
+        return out(PageKind.EMPLOYMENT_CERTIFICATE, "employment wording")
+    if has["transcript"] and has["acad_cert"]:
+        return out(PageKind.ACADEMIC_TRANSCRIPT, "academic transcript / grade sheet")
+    if has["acad_cert"] and has["acad_award"] and re.search(r"CERTIF(?:Y|IED|ICATE)", text, re.IGNORECASE):
+        return out(PageKind.ACADEMIC_CERTIFICATE, "board/university certificate")
+    if has["language_test"]:
+        return out(PageKind.LANGUAGE_TEST, "IELTS / TOPIK")
+    return out(PageKind.IGNORED, "no signature matched (IGNORE-01)")
+
+
+ACADEMIC = {PageKind.ACADEMIC_CERTIFICATE, PageKind.ACADEMIC_TRANSCRIPT}
+
+
+def classify_pages(pages: Sequence[PageReading], today: date) -> list[PageClass]:
+    """Classify every page, then apply the rules that need neighbouring pages.
+
+    Academic certificates and transcripts count only inside an apostille block (section 1.1:
+    "Apostille triggers the academic block"); elsewhere, e.g. a university's recommendation
+    letter, they are ignored.
+    """
+    classes = [classify_page(p, today) for p in pages]
+    in_block = False
+    for i, c in enumerate(classes):
+        if c.kind == PageKind.E_APOSTILLE:
+            in_block = True
+        elif c.kind in ACADEMIC:
+            if not in_block:
+                classes[i] = c.model_copy(
+                    update={"kind": PageKind.IGNORED, "reason": c.reason + ", but outside an apostille block (IGNORE-01)"}
+                )
+        else:
+            in_block = False
+    return classes

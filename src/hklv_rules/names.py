@@ -2,7 +2,7 @@
 
 Agreed policy: clean up case, punctuation, spacing, 'S/O ...'-style parentage
 suffixes and the MD/MST abbreviations, then names must be identical. Anything
-else (ASRAF vs ASHRAF, HALIMA vs HALIMA BEGUM, MST X vs X) is a mismatch that
+else (ASRAF vs ASHRAF, RAHIMA vs RAHIMA BEGUM, MST X vs X) is a mismatch that
 only a notarised affidavit can bridge.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# 'ROHUL AMIN S/O: MANIK KHAN & HALIMA' -> 'ROHUL AMIN'. Also D/O, W/O, C/O.
+# 'KAMAL UDDIN S/O: ABDUL KARIM & RAHIMA' -> 'KAMAL UDDIN'. Also D/O, W/O, C/O.
 _PARENTAGE_SUFFIX = re.compile(r"\b[SDWC]\s*/\s*O\b.*$")
 
 # Abbreviations only; spelling variants (MOHAMMED, MUHAMMAD) are NOT merged.

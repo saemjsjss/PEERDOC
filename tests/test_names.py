@@ -22,7 +22,7 @@ def test_equal_after_cleanup(a, b):
     "a, b",
     [
         ("ALI ASRAF", "ALI ASHRAF"),  # spelling variant: affidavit needed
-        ("HALIMA", "HALIMA BEGUM"),  # dropped surname: affidavit needed
+        ("RAHIMA", "RAHIMA BEGUM"),  # dropped surname: affidavit needed
         ("MST. SHAMIMA AKTER", "SHAMIMA AKTER"),  # honorific present vs absent
         ("MOHAMMED ALI", "MOHAMMAD ALI"),  # spelling variants are not merged
     ],
