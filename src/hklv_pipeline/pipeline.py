@@ -129,10 +129,11 @@ async def run_case(
         from hklv_ocr.readers import PageReader  # needs Paddle: WSL OCR environment only
 
         t = time.perf_counter()
-        reader = PageReader(progress=progress)
+        reader = PageReader()
         timings["model_load"] = time.perf_counter() - t
     t = time.perf_counter()
-    reading = await reader.read_files(files)
+    # Progress is passed per call: a shared reader (the API's) serves several jobs.
+    reading = await (reader.read_files(files, progress=progress) if progress is not None else reader.read_files(files))
     timings["ocr"] = time.perf_counter() - t
     if on_reading is not None:
         on_reading(reading)

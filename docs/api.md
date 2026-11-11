@@ -6,6 +6,9 @@ need the GPU there.
 
 ## Start
 
+The server also serves the web UI at <http://127.0.0.1:8000/> once it has been built
+(`npm --prefix frontend run build`; see `frontend/README.md`).
+
 From Windows (cmd or PowerShell):
 
 ```
@@ -23,6 +26,34 @@ The OCR models load once at startup (about 20 s). Interactive docs are at
 this Windows machine (WSL forwards localhost) but not from the network. `HKLV_PORT` changes
 the port. One worker: the GPU is a single shared resource, and pages from concurrent
 requests take turns on it.
+
+## Jobs: `POST /jobs`, `GET /jobs/{id}`, `DELETE /jobs/{id}` (what the web UI uses)
+
+A full case takes about 8½ minutes, too long to hold one request open. So:
+
+1. `POST /jobs` takes the same form fields as `/verify` (below), checks and stores the
+   upload, and answers **202** at once with a job: `job_id`, `status` `queued`, `pages_total`,
+   `files` (accepted / ignored), `eta_seconds`.
+2. `GET /jobs/{job_id}` every couple of seconds:
+
+   | Field | Meaning |
+   |---|---|
+   | `status` | `queued`, `running`, `done`, `failed` |
+   | `stage` / `message` | `waiting` (behind other cases), `reading` (OCR), `checking` (online checks and rules), `finished` |
+   | `pages_done` / `pages_total` | pages read so far |
+   | `progress` | 0..1 for a progress bar |
+   | `eta_seconds` | estimated seconds until the verdict (learned from this server's own speed) |
+   | `queue_position` | cases ahead of this one while queued |
+   | `result` | the same verdict JSON as `/verify`, once `status` is `done` |
+   | `error` | the error type, if `status` is `failed` |
+
+3. `DELETE /jobs/{job_id}` cancels a waiting job or forgets a finished one (204). A job whose
+   pages are being read can't be stopped half-way (409).
+
+One worker reads one case at a time (the GPU is shared); other cases wait in the queue (at
+most 20, else 503). A job's uploaded files are deleted the moment it finishes, fails or is
+cancelled. Verdicts are kept in memory only, for one hour after the job ends (then 404), and
+are lost if the server restarts. Job ids are long random tokens.
 
 ## `POST /verify`
 

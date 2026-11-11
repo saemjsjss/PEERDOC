@@ -179,6 +179,7 @@ class PageReader:
         self.stats: deque[PageStat] = deque(maxlen=200)
 
     check_readable = staticmethod(check_readable)
+    page_count = staticmethod(page_count)
 
     @staticmethod
     def versions() -> dict[str, str]:
@@ -279,15 +280,18 @@ class PageReader:
 
     # -- async API ---------------------------------------------------------------------
 
-    async def read_file(self, path: Path, first_page_no: int = 1) -> list[PageReading]:
+    async def read_file(
+        self, path: Path, first_page_no: int = 1, progress: Callable[[PageStat], None] | None = None
+    ) -> list[PageReading]:
         """Read one file page by page: render, OCR, release, then the next page."""
         pages = []
         for i in range(await asyncio.to_thread(page_count, path)):
             async with self._gpu:
                 (width, height), lines, blocks, barcodes, stat = await asyncio.to_thread(self._read_one_page, path, i)
             self.stats.append(stat)
-            if self.progress is not None:
-                self.progress(stat)
+            callback = progress or self.progress  # per call (one job's pages) or reader-wide
+            if callback is not None:
+                callback(stat)
             pages.append(
                 PageReading(
                     page_no=first_page_no + i,
@@ -303,8 +307,8 @@ class PageReader:
             )
         return pages
 
-    async def read_files(self, paths: Sequence[Path]) -> CaseReading:
+    async def read_files(self, paths: Sequence[Path], progress: Callable[[PageStat], None] | None = None) -> CaseReading:
         pages: list[PageReading] = []
         for path in paths:
-            pages.extend(await self.read_file(path, first_page_no=len(pages) + 1))
+            pages.extend(await self.read_file(path, first_page_no=len(pages) + 1, progress=progress))
         return CaseReading(pages=tuple(pages), readers=self.versions())

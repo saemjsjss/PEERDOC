@@ -79,7 +79,7 @@ def post(client, files, **form):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok", "version": "1.0.0", "models_loaded": False}
+    assert client.get("/health").json() == {"status": "ok", "version": "1.1.0", "models_loaded": False}
     use()
     assert client.get("/health").json()["models_loaded"] is True
 
