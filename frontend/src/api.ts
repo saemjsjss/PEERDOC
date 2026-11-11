@@ -1,5 +1,9 @@
 // Client for the HKLV API (see docs/api.md). Types mirror the server's JSON.
 
+/** Sent with every request; the server rejects state-changing requests without it (a page
+ * on another site can't add a custom header to a cross-origin request without CORS). */
+export const API_HEADERS = { 'X-HKLV': '1' } as const
+
 export type Outcome = 'PASS' | 'FLAG' | 'FAIL'
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed'
 export type Stage = 'waiting' | 'reading' | 'checking' | 'finished'
@@ -75,6 +79,8 @@ export interface Job {
   files: FileReport
   result: Verdict | null
   error: string | null
+  /** Changes when the server restarts (and forgets every job). */
+  server_id?: string
 }
 
 export interface SubmitOptions {
@@ -94,7 +100,7 @@ export class ApiError extends Error {
   }
 }
 
-function errorFrom(status: number, body: unknown): ApiError {
+export function errorFrom(status: number, body: unknown): ApiError {
   const detail = (body as { detail?: unknown } | null)?.detail
   if (typeof detail === 'string') return new ApiError(status, detail)
   if (detail && typeof detail === 'object') {
@@ -120,9 +126,11 @@ export function submitJob(
   if (options.evaluationDate) form.append('evaluation_date', options.evaluationDate)
   form.append('online', options.online ? 'true' : 'false')
 
+  if (signal?.aborted) return Promise.reject(new DOMException('Upload cancelled', 'AbortError'))
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/jobs')
+    for (const [name, value] of Object.entries(API_HEADERS)) xhr.setRequestHeader(name, value)
     xhr.responseType = 'json'
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onUploadProgress(e.loaded / e.total)
@@ -141,7 +149,7 @@ export function submitJob(
 export async function getJob(jobId: string, signal?: AbortSignal): Promise<Job> {
   let response: Response
   try {
-    response = await fetch(`/jobs/${encodeURIComponent(jobId)}`, { signal, cache: 'no-store' })
+    response = await fetch(`/jobs/${encodeURIComponent(jobId)}`, { signal: signal ?? null, cache: 'no-store', headers: API_HEADERS })
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
     throw errorFrom(0, null)
@@ -152,8 +160,12 @@ export async function getJob(jobId: string, signal?: AbortSignal): Promise<Job> 
 }
 
 /** Cancel a waiting job, or forget a finished one (the server keeps verdicts for an hour). */
-export async function deleteJob(jobId: string): Promise<void> {
-  const response = await fetch(`/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+export async function deleteJob(jobId: string, signal?: AbortSignal): Promise<void> {
+  const response = await fetch(`/jobs/${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
+    headers: API_HEADERS,
+    signal: signal ?? null,
+  })
   if (!response.ok && response.status !== 404) {
     throw errorFrom(response.status, await response.json().catch(() => null))
   }

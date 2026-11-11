@@ -123,9 +123,11 @@ def test_chain_tin_father_and_employment_mother_fails():
     assert overall(r.values()) is Outcome.FAIL
 
 
-def test_chain_with_employment_in_student_name_fails_chain_03():
+def test_chain_with_employment_in_student_name_fails_chain_02():
+    # The employee being the student is EMP-05's FAIL; CHAIN-03 checks only the TIN.
     r = chain(tin(FATHER), employment(STUDENT))
-    assert r["CHAIN-03"].outcome is Outcome.FAIL
+    assert r["CHAIN-02"].outcome is Outcome.FAIL
+    assert r["CHAIN-03"].outcome is Outcome.PASS
 
 
 def test_chain_with_both_trade_and_employment_flags():
@@ -136,7 +138,7 @@ def test_chain_with_both_trade_and_employment_flags():
 def test_chain_without_any_income_document_fails():
     r = chain(tin(FATHER))
     assert {v.outcome for v in r.values()} == {Outcome.FAIL}
-    assert "no Trade License or Employment Certificate" in r["CHAIN-01"].reason
+    assert "no Trade License or Employment Certificate" in r["CHAIN-02"].reason
 
 
 def test_low_confidence_employment_status_flags():
@@ -146,7 +148,6 @@ def test_low_confidence_employment_status_flags():
 
 def test_chain_tin_in_student_name_fails_even_when_employee_unreadable():
     r = chain(tin(STUDENT), employment(FATHER, confidence=LOW))
-    assert r["CHAIN-01"].outcome is Outcome.FLAG
     assert r["CHAIN-03"].outcome is Outcome.FAIL
     assert r["CHAIN-02"].outcome is Outcome.FAIL
 

@@ -30,6 +30,13 @@ from pathlib import Path
 from .reading import Barcode, Box, CaseReading, LayoutBlock, PageReading, TextLine
 
 RENDER_DPI = 300  # PP-OCRv6 needs it for MRZ and small print
+# A page image never exceeds this (an A4 page at 300 dpi is ~8.7 MP). A PDF page with a
+# huge MediaBox is rendered at a lower scale, and a huge photo is shrunk, instead of
+# allocating gigabytes and getting the server killed.
+MAX_PAGE_PIXELS = 40_000_000
+# Pillow refuses to open images above twice this ("decompression bomb"); set explicitly
+# rather than relying on the library default. Uploads above it are rejected as unreadable.
+MAX_IMAGE_PIXELS = 100_000_000
 # PaddleOCR-VL reads well at ~150 dpi; at 300 dpi each block costs ~4x the vision tokens.
 VL_SCALE = 0.5
 # Per-block generation cap (library default 4096). PaddleOCR-VL sometimes loops on repeated
@@ -62,24 +69,39 @@ def page_count(path: Path) -> int:
             pdf.close()
 
 
+def _pil_image():
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    return Image
+
+
+def render_scale(width_pt: float, height_pt: float, dpi: int = RENDER_DPI) -> float:
+    """PDF render scale: `dpi`, lowered so the page stays within MAX_PAGE_PIXELS."""
+    scale = dpi / 72
+    area = max(width_pt, 1.0) * max(height_pt, 1.0)
+    return min(scale, (MAX_PAGE_PIXELS / area) ** 0.5)
+
+
 def check_readable(path: Path) -> None:
     """Raise if the readers can't open this file (empty, truncated, not really a PDF/image)."""
     if path.suffix.lower() == ".pdf":
         if page_count(path) < 1:
             raise ValueError("PDF has no pages")
         return
-    from PIL import Image
-
-    with Image.open(path) as img:
+    with _pil_image().open(path) as img:
+        if img.width * img.height > MAX_IMAGE_PIXELS:
+            raise ValueError("image has too many pixels")
         img.verify()
 
 
 def render_page(path: Path, index: int, dpi: int = RENDER_DPI):
     """One page as an RGB PIL image (0-based index). Only this page is held in memory."""
-    from PIL import Image
-
     if path.suffix.lower() != ".pdf":
-        with Image.open(path) as img:
+        with _pil_image().open(path) as img:
+            if img.width * img.height > MAX_PAGE_PIXELS:
+                factor = (MAX_PAGE_PIXELS / (img.width * img.height)) ** 0.5
+                img.thumbnail((max(1, int(img.width * factor)), max(1, int(img.height * factor))))
             return img.convert("RGB")
     import pypdfium2 as pdfium
 
@@ -88,7 +110,7 @@ def render_page(path: Path, index: int, dpi: int = RENDER_DPI):
         try:
             page = pdf[index]
             try:
-                bitmap = page.render(scale=dpi / 72)
+                bitmap = page.render(scale=render_scale(*page.get_size(), dpi))
                 image = bitmap.to_pil().convert("RGB")
                 bitmap.close()
                 return image
@@ -204,7 +226,7 @@ class PageReader:
             ]
         return tuple(
             TextLine(text=t, score=max(0.0, min(1.0, float(s))), box=_box(b))
-            for t, s, b in zip(res["rec_texts"], res["rec_scores"], boxes)
+            for t, s, b in zip(res["rec_texts"], res["rec_scores"], boxes, strict=False)
             if t.strip()
         )
 

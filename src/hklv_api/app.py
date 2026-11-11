@@ -2,8 +2,12 @@
 
     POST   /jobs          upload PDFs/images and/or ZIPs; returns a job id at once (202)
     GET    /jobs/{id}     progress (stage, pages read, time left) and, when done, the verdict
-    DELETE /jobs/{id}     cancel a waiting job, or forget a finished one's verdict
+    DELETE /jobs/{id}     cancel a waiting or running job, or forget a finished one's verdict
     POST   /verify        the same in one request (waits for the verdict, ~8 min per case)
+
+POST and DELETE need the header `X-HKLV: 1` (403 without it): a web page on another site
+can't send a custom header without a CORS preflight, which this server never approves.
+Requests must also name the host 127.0.0.1 or localhost (DNS-rebinding protection).
     GET    /health        is the server up, are the OCR models loaded
     GET    /              the web UI (frontend/dist), when it has been built
 
@@ -26,13 +30,13 @@ import tempfile
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from hklv_pipeline import run_case
-
-from .jobs import JobManager, JobStatus, JobView, QueueFull
+from .jobs import Job, JobManager, JobStatus, JobView, QueueFull
 from .responses import Counts, FileReport, OnlineResult, VerifyResponse, build_response  # noqa: F401 (re-exported)
 from .uploads import MAX_UPLOAD_BYTES, SavedFiles, UploadError, drop_unreadable, save_uploads
 
@@ -41,23 +45,34 @@ API_VERSION = "1.1.0"
 # Multipart framing adds a little on top of the files themselves.
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 5 * 1024 * 1024
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+# A bigger case is refused at upload: it would hold the only GPU worker for hours.
+MAX_PAGES = 300
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+CSRF_HEADER = b"x-hklv"  # must be "1" on POST and DELETE
 
 
-def _work_dir() -> str | None:
-    folder = os.environ.get("HKLV_WORK_DIR")
-    if folder:
-        Path(folder).mkdir(parents=True, exist_ok=True)
-    return folder  # None -> the system temp folder (TMPDIR)
+def _base_dir() -> Path:
+    # HKLV_WORK_DIR (serve.sh sets it), else the system temp folder (TMPDIR).
+    return Path(os.environ.get("HKLV_WORK_DIR") or tempfile.gettempdir())
+
+
+def _work_dir() -> str:
+    """This instance's own folder for case uploads. Two servers can't share a port, so a
+    per-port folder keeps one instance's startup sweep away from another's live cases."""
+    folder = _base_dir() / f"hklv-port-{os.environ.get('HKLV_PORT', '8000')}"
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return str(folder)
 
 
 def _sweep_leftover_uploads() -> int:
-    """Delete case folders a killed server left behind (one worker, so none are in use)."""
-    base = Path(_work_dir() or tempfile.gettempdir())
+    """Delete case folders a killed server on this port left behind (one worker, so none of
+    this instance's are in use yet), plus any from before per-port folders existed."""
     removed = 0
-    for folder in base.glob("hklv-case-*"):
-        if folder.is_dir():
-            shutil.rmtree(folder, ignore_errors=True)
-            removed += 1
+    for base in (Path(_work_dir()), _base_dir()):
+        for folder in base.glob("hklv-case-*"):
+            if folder.is_dir():
+                shutil.rmtree(folder, ignore_errors=True)
+                removed += 1
     return removed
 
 
@@ -158,7 +173,25 @@ async def _send_json(send, status: int, detail: str) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+class RequireCustomHeader:
+    """403 for POST/DELETE without `X-HKLV: 1`. Browsers only send a custom header
+    cross-origin after a CORS preflight, which this server never approves, so another web
+    page the operator has open can't submit or delete jobs."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] in ("POST", "DELETE", "PUT", "PATCH"):
+            if dict(scope.get("headers") or []).get(CSRF_HEADER) != b"1":
+                return await _send_json(send, 403, "missing header X-HKLV: 1")
+        return await self.app(scope, receive, send)
+
+
+# Added innermost first: TrustedHost runs first, then the header check, then the size cap.
 app.add_middleware(LimitRequestBody)
+app.add_middleware(RequireCustomHeader)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 
 # --- shared steps --------------------------------------------------------------------------
@@ -210,33 +243,21 @@ def _count_pages(folder: Path, saved: SavedFiles, reader) -> int:
     return total
 
 
-# --- routes --------------------------------------------------------------------------------
-
-
-@app.get("/health")
-async def health(request: Request) -> dict:
-    return {"status": "ok", "version": API_VERSION, "models_loaded": request.app.state.reader is not None}
-
-
-@app.post("/jobs", response_model=JobView, status_code=202, responses={499: {"description": "client went away before the job was queued"}})
-async def submit_job(
-    request: Request,
-    files: list[UploadFile] = File(..., description="PDFs, images, and/or ZIP files of PDFs and images"),
-    case_id: str | None = Form(None, max_length=100),
-    evaluation_date: date | None = Form(None, description="Defaults to today"),
-    online: bool = Form(True, description="Check e-Apostilles and challans on the official sites"),
-) -> JobView:
+async def _queue_upload(request: Request, files, case_id, evaluation_date, online) -> Job | None:
+    """Save and check the upload, then queue it as a job. None if the client went away."""
     reader = _reader(request)
     folder = Path(tempfile.mkdtemp(prefix="hklv-case-", dir=_work_dir()))
     try:
         saved = await _save_and_check(files, folder, reader)
         pages = await asyncio.to_thread(_count_pages, folder, saved, reader)
+        if pages > MAX_PAGES:
+            raise HTTPException(status_code=413, detail=f"too many pages ({pages}; limit {MAX_PAGES})")
         # The client may have given up (Cancel) while the upload was being unpacked and
         # checked: don't queue a case nobody can follow or delete.
         if await request.is_disconnected():
             shutil.rmtree(folder, ignore_errors=True)
-            return Response(status_code=499)
-        job = request.app.state.jobs.submit(
+            return None
+        return request.app.state.jobs.submit(
             folder,
             saved,
             case_id=(case_id or "").strip() or "upload",
@@ -250,52 +271,69 @@ async def submit_job(
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+# --- routes --------------------------------------------------------------------------------
+
+Files = Annotated[list[UploadFile], File(description="PDFs, images, and/or ZIP files of PDFs and images")]
+CaseId = Annotated[str | None, Form(max_length=100)]
+EvaluationDate = Annotated[date | None, Form(description="Defaults to today")]
+Online = Annotated[bool, Form(description="Check e-Apostilles and challans on the official sites")]
+
+
+@app.get("/health")
+async def health(request: Request) -> dict:
+    return {
+        "status": "ok",
+        "version": API_VERSION,
+        "models_loaded": request.app.state.reader is not None,
+        "server_id": request.app.state.jobs.server_id,
+    }
+
+
+@app.post("/jobs", status_code=202, responses={499: {"description": "client went away before the job was queued"}})
+async def submit_job(
+    request: Request, files: Files, case_id: CaseId = None, evaluation_date: EvaluationDate = None, online: Online = True
+) -> JobView:
+    job = await _queue_upload(request, files, case_id, evaluation_date, online)
+    if job is None:
+        return Response(status_code=499)
     return request.app.state.jobs.view(job)
 
 
-@app.get("/jobs/{job_id}", response_model=JobView)
+@app.get("/jobs/{job_id}")
 async def get_job(job_id: str, request: Request) -> JobView:
     job = request.app.state.jobs.get(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="no such job (finished verdicts are kept for one hour)")
+        raise HTTPException(
+            status_code=404,
+            detail="no such job (finished verdicts are kept for one hour, and a server restart forgets them)",
+        )
     return request.app.state.jobs.view(job)
 
 
 @app.delete("/jobs/{job_id}", status_code=204)
 async def delete_job(job_id: str, request: Request) -> Response:
-    if not request.app.state.jobs.delete(job_id):
-        raise HTTPException(status_code=409, detail="the job is being read now and can't be stopped; delete it when it has finished")
+    # A running job stops after the page being read; its files are deleted then.
+    request.app.state.jobs.delete(job_id)
     return Response(status_code=204)
 
 
-@app.post("/verify", response_model=VerifyResponse)
+@app.post("/verify")
 async def verify(
-    request: Request,
-    files: list[UploadFile] = File(..., description="PDFs, images, and/or ZIP files of PDFs and images"),
-    case_id: str | None = Form(None, max_length=100),
-    evaluation_date: date | None = Form(None, description="Defaults to today"),
-    online: bool = Form(True, description="Check e-Apostilles and challans on the official sites"),
+    request: Request, files: Files, case_id: CaseId = None, evaluation_date: EvaluationDate = None, online: Online = True
 ) -> VerifyResponse:
-    reader = _reader(request)
-    with tempfile.TemporaryDirectory(prefix="hklv-case-", dir=_work_dir()) as tmp:
-        folder = Path(tmp)
-        saved = await _save_and_check(files, folder, reader)
-        try:
-            # Wait for the case being read (if any): one case on the GPU at a time.
-            async with request.app.state.jobs.case_lock:
-                result = await run_case(
-                    folder,
-                    case_id=(case_id or "").strip() or "upload",
-                    evaluation_date=evaluation_date or date.today(),
-                    reader=reader,
-                    online=online,
-                    fetch=request.app.state.fetch,
-                )
-        except Exception as e:  # noqa: BLE001
-            # Log the type only: messages could quote document content.
-            log.error("verification failed: %s", type(e).__name__)
-            raise HTTPException(status_code=500, detail=f"verification failed ({type(e).__name__})") from None
-    return build_response(result, saved)
+    # Through the same queue as POST /jobs: same waiting limit, counted in everyone's ETA.
+    job = await _queue_upload(request, files, case_id, evaluation_date, online)
+    if job is None:
+        return Response(status_code=499)
+    try:
+        await job.ended.wait()
+    finally:
+        request.app.state.jobs.delete(job.id)  # nobody polls a /verify job; cancels it if still going
+    if job.status is not JobStatus.DONE or job.result is None:
+        raise HTTPException(status_code=500, detail=job.error or "verification failed")
+    return job.result
 
 
 # The built web UI, served from the same origin as the API (no CORS needed). Mounted last

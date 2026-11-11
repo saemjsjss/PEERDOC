@@ -50,6 +50,8 @@ ALLOWED_HOSTS = frozenset({APOSTILLE_HOST, ACHALLAN_HOST})
 USER_AGENT = "Mozilla/5.0 (HKLV document verification)"
 TIMEOUT_SECONDS = 20  # per socket operation
 TOTAL_DEADLINE_SECONDS = 45  # for the whole download, however slowly bytes trickle in
+# (checked after every read; a read returns as soon as any bytes arrive, so a trickling
+# server is cut off at TOTAL_DEADLINE_SECONDS + at most one TIMEOUT_SECONDS wait)
 MAX_RESPONSE_BYTES = 2_000_000  # the real pages are ~40 KB
 PAUSE_BETWEEN_REQUESTS = 0.5  # be polite to small government servers
 
@@ -79,7 +81,8 @@ def http_fetch(url: str) -> tuple[int, str]:
     try:
         with _opener.open(request, timeout=TIMEOUT_SECONDS) as response:
             body = bytearray()
-            while chunk := response.read(65536):
+            # read1: whatever has arrived (up to 64 KB), not "wait until 64 KB arrived".
+            while chunk := response.read1(65536):
                 body += chunk
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise ValueError(f"response larger than {MAX_RESPONSE_BYTES} bytes")
@@ -92,6 +95,7 @@ def http_fetch(url: str) -> tuple[int, str]:
                 charset = "utf-8"
             return response.status, bytes(body).decode(charset, errors="replace")
     except urllib.error.HTTPError as e:
+        e.close()  # it holds the connection open otherwise
         return e.code, ""
 
 
@@ -249,7 +253,7 @@ def check_challan(challan_no: str | None, fetch: Fetch = http_fetch) -> OnlineCh
     if refund is not None and refund is not False:  # identity: 0 == False must not slip through
         return _unavailable(f"the challan site showed an unrecognised refund flag ({refund!r})")
     try:
-        amount = Decimal(str(obj.get("Amount")))
+        amount = Decimal(str(obj.get("Amount")).replace(",", ""))  # the site prints "3,000.00"
     except (InvalidOperation, ValueError):
         return _unavailable("the challan site did not show a readable amount")
     if not amount.is_finite():

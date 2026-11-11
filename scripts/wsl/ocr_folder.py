@@ -66,7 +66,7 @@ def main(src: Path, out: Path) -> int:
                     summary.flush()
                     print(f"{f.name} p{page_no}: {dt:.1f}s, {row['blocks']} blocks, {row['chars']} chars", flush=True)
                     t = time.perf_counter()
-            except Exception:
+            except Exception:  # noqa: BLE001  (log it and go on with the next file)
                 failures += 1
                 print(f"FAILED {f.name}:\n{traceback.format_exc()}", flush=True)
                 summary.write(json.dumps({"file": f.name, "error": traceback.format_exc()[-500:]}) + "\n")

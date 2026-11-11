@@ -149,8 +149,9 @@ challan's result between extraction and the rules.
 * Challan: challanverification.finance.gov.bd shows automated challans (A-challan numbers,
   `YYYY-NNNNNNNNNN`) by embedding the Finance Division's A-challan system,
   www.achallan.gov.bd, so that is the host the check calls. Found -> the website amount is
-  compared with the printed amount (TAX-04 PASS/FAIL); no such challan, or a challan with a
-  refund request (marked "not valid for any service"), -> NOT_FOUND (FAIL); anything else
+  compared with the printed amount (TAX-04 PASS/FAIL); a challan with a refund request
+  (marked "not valid for any service") -> FAIL; no such challan -> FLAG (a misread number
+  looks the same, see the 2026-11-12 changes below); anything else
   -> UNAVAILABLE (FLAG). Bank-counter challans need bank, branch and date on the site's form
   and are left for manual review (FLAG). No real challan has been checked yet: the sample
   set has none. The owner confirmed on 2026-11-11 that real challan numbers may be sent to
@@ -158,3 +159,45 @@ challan's result between extraction and the rules.
 * Only those two official hosts are ever contacted, over https; the QR's own URL is never
   opened (the official URL is rebuilt from the number), and redirects elsewhere are refused.
 * `scripts/run_case.py --offline` turns the checks off (ACAD-01 / TAX-04 then FLAG).
+
+
+## Changes agreed with the owner on 2026-11-12
+
+* **Birth Certificates are the student's only.** Parents are identified by NID or passport,
+  never by a birth certificate.
+* **BIRTH-03 (DOB)** is now PASS/FAIL. For a Bangla certificate with an English translation,
+  only the birth year is compared. For an English certificate (the old BDR Form-3 and the
+  new bilingual bdris.gov.bd certificate), the full date must match. A date OCR read with low
+  confidence PASSes only if it agrees with the passport exactly; if it differs, it is a FLAG,
+  because the difference may be a misread.
+* **BIRTH-05 (new, Name):** the birth certificate name must match StudentRef (the passport);
+  a mismatch FAILs. This is what catches a parent's birth certificate.
+* **Old BDR Form-3 boxed date of birth:** the filled square between month and year
+  (`25 | 02 | ■ | 2002`) is skipped when the date is read.
+* **TAX-02 removed** (total tax paid >= 10,000 BDT). The challan is judged by TAX-04 only.
+* **TAX-04:** the challan number is read from the QR first, falling back to the printed text.
+  The printed amount comes from "Total Amount" and never from the line under "Amount in
+  words". A refunded challan FAILs. "No such challan" is a FLAG, because a misread number
+  looks the same to the website.
+* **Overlaps removed:**
+  * CHAIN-01 (TIN name equals Trade License / Employment Certificate name) was the same check
+    as TIN-03, so it is deleted.
+  * CHAIN-03 now checks only the TIN; the income document being the student's is
+    TRADE-04 / EMP-05's job.
+  * REQ-08/09 point to NID-ASSIGN instead of repeating why an NID could not be assigned.
+* **Names:** the MD / MST titles match their common spellings (MOHAMMED, MUHAMMAD,
+  MOSAMMET ...). The same words in another order count as the same name. Other spelling
+  differences still need an affidavit.
+* **FRC relations** are matched by word: "Father (Late)", "Father's", "Self (Applicant)" and
+  the Bangla পিতা / মাতা / নিজ all count. "Father-in-law" and "Step Mother" do not. A Bangla
+  relation the engine doesn't know is a FLAG.
+* **Classification:** a page that only quotes an "NID No" (bank solvency letters, employer
+  letters) is classified as an NID only after the bank and employment checks.
+* **Found while testing the sample sets (2026-11-12), needs approval:**
+  * An FRC that names the student only in an "Applicant Name:" line under the table, with no
+    SELF row in it, is read as having an APPLICANT row.
+  * When the layout reader returns only part of an FRC table, the FATHER / MOTHER cells it
+    dropped are treated as unreadable rows, so FRC-03 FLAGs instead of FAILing.
+  * A page that only repeats a translation agency's own "Trade Licence No." is not a trade
+    licence. A translated NID, birth certificate or FRC on such letterhead is read as what it is.
+  * A PDF page that holds only a picture counts as the photo (REQ-02).

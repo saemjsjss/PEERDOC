@@ -112,11 +112,12 @@ def birth_certificate(
     notary=_DEFAULT,
     field_confidence: float = HIGH,
     doc_id: str = "birth",
+    name: str | None = STUDENT,
 ) -> BirthCertificate:
     return BirthCertificate(
         doc_id=doc_id,
         registration_number=_opt(brn, field_confidence),
-        name=ex(STUDENT),
+        name=_opt(name, confidence),
         date_of_birth=_opt(dob, field_confidence),
         father_name=ex(father, confidence),
         mother_name=ex(mother, confidence),

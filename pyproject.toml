@@ -6,9 +6,10 @@ requires-python = ">=3.12"
 dependencies = ["pydantic>=2.7,<3"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
-# FastAPI backend (run the server in the WSL OCR environment: scripts/wsl/serve.sh)
-api = ["fastapi>=0.115", "python-multipart>=0.0.9", "uvicorn>=0.30"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.17"]
+# FastAPI backend (run the server in the WSL OCR environment: scripts/wsl/serve.sh).
+# Upper bounds: the code relies on Starlette 1.x ASGI behaviour (app.py middleware).
+api = ["fastapi>=0.115,<0.163", "starlette<2", "python-multipart>=0.0.9", "uvicorn>=0.30"]
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -20,3 +21,27 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "BLE", "S", "ASYNC", "UP"]
+ignore = [
+    "E501",    # long lines: the code favours one-line data and test tables
+    "E731",    # lambda assignment: used deliberately for deferred checks
+    "S101",    # assert: pytest and invariants
+    "S310",    # urlopen: http_fetch validates scheme and host before any request
+    "S603",    # subprocess without shell: arguments are built by our scripts
+    "S607",    # partial executable path: wsl/npm on PATH
+    "UP042",   # (str, Enum) classes: StrEnum changes str(); converted where checked (hklv_api)
+    "UP046",   # PEP 695 generics: style only
+    "UP047",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B", "BLE", "E741"]
+"scripts/**" = ["S", "ASYNC240"]  # one-off CLI scripts
+"src/hklv_rules/models/verdict.py" = ["S105"]  # Outcome.PASS is not a password

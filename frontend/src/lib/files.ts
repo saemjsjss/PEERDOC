@@ -2,6 +2,7 @@
 export const ACCEPTED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp', '.zip'] as const
 export const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',')
 export const MAX_UPLOAD_BYTES = 150 * 1024 * 1024 // server limit (src/hklv_api/uploads.py)
+export const MAX_FILES = 200 // server limit on files in one upload (src/hklv_api/uploads.py)
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.')

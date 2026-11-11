@@ -39,7 +39,12 @@ def digit_difference(a: str, b: str) -> int:
     difference, not as every later digit shifting."""
     a, b = digits(a), digits(b)
     if len(a) == len(b):
-        return sum(ca != cb for ca, cb in zip(a, b))
+        return sum(ca != cb for ca, cb in zip(a, b, strict=True))
+    return edit_distance(a, b)
+
+
+def edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance: insertions, deletions and substitutions each count one."""
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
         cur = [i]

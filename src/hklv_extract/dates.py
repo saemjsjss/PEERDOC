@@ -20,7 +20,8 @@ _MONTHS = {
 _MONTH_RE = "|".join(sorted(_MONTHS, key=len, reverse=True))
 
 _NUMERIC = re.compile(r"\b(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})\b")
-_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+# Year first is unambiguous with any separator: '2003-04-05', '2003/04/05' (TOPIK), '2003.04.05'.
+_ISO = re.compile(r"(?<!\d)(\d{4})([-/.])(\d{2})\2(\d{2})(?!\d)")
 _DAY_MONTH = re.compile(r"\b(\d{1,2})(?:ST|ND|RD|TH)?[\s\-.,/]*(" + _MONTH_RE + r")[A-Z]*[\s\-.,/']*(\d{4})\b", re.IGNORECASE)
 _MONTH_DAY = re.compile(r"\b(" + _MONTH_RE + r")[A-Z]*[\s\-.]*(\d{1,2})(?:ST|ND|RD|TH)?,?\s*(\d{4})\b", re.IGNORECASE)
 
@@ -36,7 +37,7 @@ def find_dates(text: str) -> list[date]:
     """Every unambiguous calendar date in `text`, in order of appearance."""
     hits: list[tuple[int, date]] = []
     for m in _ISO.finditer(text):
-        if (d := _make(int(m[1]), int(m[2]), int(m[3]))) is not None:
+        if (d := _make(int(m[1]), int(m[3]), int(m[4]))) is not None:
             hits.append((m.start(), d))
     for m in _NUMERIC.finditer(text):
         if (d := _make(int(m[3]), int(m[2]), int(m[1]))) is not None:
@@ -71,9 +72,14 @@ def parse_boxed_date(text: str) -> date | None:
     digits. Day-first (DDMMYYYY) as every Bangladeshi form; YYYYMMDD only when that is the
     sole valid reading. If both read as different valid dates, nothing is returned.
     """
-    if not re.fullmatch(r"[\d\s]+", text or ""):
+    # Box borders and the filled square some forms print between month and year
+    # ('25 | 02 | ■ | 2002') read as | [ ] I l or a block character: not digits.
+    text = re.sub(r"[|\[\]Il■-▫█]", " ", text or "")
+    if not re.fullmatch(r"[\d\s]+", text):
         return None
     d = re.sub(r"\s", "", text)
+    if len(d) == 9 and re.fullmatch(r"\d{2}\s+\d{2}\s+\d\s+\d{4}", text.strip()):
+        d = d[:4] + d[5:]  # the filled square read as one digit of its own
     if len(d) != 8:
         return None
     day_first = _make(int(d[4:]), int(d[2:4]), int(d[:2])) if 1900 <= int(d[4:]) <= 2100 else None
@@ -108,6 +114,34 @@ def _small_number(words: list[str]) -> int | None:
     if len(words) == 2 and words[0] in _TENS and words[1] in _UNITS and 0 < _UNITS[words[1]] < 10:
         return _TENS[words[0]] + _UNITS[words[1]]
     return None
+
+
+_SCALES = {"hundred": 100, "thousand": 1000, "lakh": 100_000, "lac": 100_000, "crore": 10_000_000}
+
+
+def parse_amount_words(text: str) -> int | None:
+    """'Three Thousand Taka Only' -> 3000, 'One Lakh Twenty Five Thousand' -> 125000.
+    None unless every word is understood."""
+    words = [w for w in re.findall(r"[a-z]+", text.lower()) if w not in ("and", "taka", "tk", "only")]
+    total = current = 0
+    run: list[str] = []
+    for w in words:
+        if w in _SCALES:
+            n = _small_number(run)
+            if not n:
+                return None
+            run = []
+            if w == "hundred":
+                current += n * 100
+            else:
+                total += (current + n) * _SCALES[w]
+                current = 0
+        elif w in _UNITS or w in _TENS:
+            run.append(w)
+        else:
+            return None
+    n = _small_number(run)
+    return None if n is None or not words else total + current + n
 
 
 def _year_words(words: list[str]) -> int | None:

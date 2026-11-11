@@ -101,12 +101,11 @@ def _date(yymmdd: str, *, birth: bool, today: date) -> date | None:
     if not yymmdd.isdigit():
         return None
     yy, mm, dd = int(yymmdd[:2]), int(yymmdd[2:4]), int(yymmdd[4:6])
-    year = 2000 + yy
-    if birth and year > today.year:
-        year -= 100
     try:
-        return date(year, mm, dd)
-    except ValueError:
+        d = date(2000 + yy, mm, dd)
+        # A birth date can't be in the future: '261201' read on 2026-11-12 is 1926.
+        return d.replace(year=d.year - 100) if birth and d > today else d
+    except ValueError:  # includes 29 Feb in a century year that isn't a leap year
         return None
 
 

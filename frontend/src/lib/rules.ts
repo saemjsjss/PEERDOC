@@ -42,8 +42,9 @@ const TITLES: Record<string, string> = {
   'NID-03': 'NID number on card matches the translation',
   'BIRTH-01': 'Birth certificate in English or translated',
   'BIRTH-02': 'Birth certificate is notarised',
-  'BIRTH-03': 'Date of birth matches the passport',
+  'BIRTH-03': 'Date of birth matches the passport (year only if translated)',
   'BIRTH-04': 'Registration number starts with the birth year',
+  'BIRTH-05': 'Birth certificate name matches the passport',
   'DEATH-01': 'Death certificate is for the father or mother',
   'DEATH-02': 'Death certificate in English or translated',
   'DEATH-03': 'Death certificate is notarised',
@@ -70,15 +71,13 @@ const TITLES: Record<string, string> = {
   'TIN-01': 'TIN QR code can be read',
   'TIN-02': 'Printed TIN matches the QR code',
   'TIN-03': 'Taxpayer is the trade licence owner',
-  'CHAIN-01': 'TIN and trade licence name the same person',
   'CHAIN-02': 'TIN and trade licence belong to the same parent',
-  'CHAIN-03': 'Neither is in the student’s name',
+  'CHAIN-03': 'TIN is not in the student’s name',
   'ACAD-01': 'e-Apostille verified on the official register',
   'ACAD-02': 'Certificate and transcript for each level',
   'ACAD-03': 'Valid equivalency track (e.g. SSC + HSC)',
   'ACAD-04': "Names match the student; SSC date of birth matches",
   'TAX-01': 'Income tax documents (optional)',
-  'TAX-02': 'Tax paid at least 10,000 BDT',
   'TAX-03': 'Income shown at least 5,000,000 BDT',
   'TAX-04': 'Challan verified online',
   'LANG-01': 'Test taken within the last 2 years',
@@ -144,7 +143,8 @@ export function problemsFirst(results: RuleResult[]): RuleResult[] {
  * "notary.notary_text_present" -> "notary text present", "members[2].name" -> "member 3 name". */
 export function fieldLabel(field: string): string {
   const parts = field.split('.')
-  if (parts.length > 1 && parts[1].startsWith(parts[0])) parts.shift() // no "notary notary ..."
+  const [first, second] = parts
+  if (first !== undefined && second?.startsWith(first)) parts.shift() // no "notary notary ..."
   return parts
     .join(' ')
     .replace(/(\w+)s\[(\d+)\]/g, (_m, word: string, i: string) => `${word} ${Number(i) + 1}`)

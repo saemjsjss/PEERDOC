@@ -11,6 +11,7 @@ import re
 from itertools import permutations
 from collections.abc import Callable, Sequence
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from hklv_ocr.reading import PageReading, TextLine
 from hklv_rules.models import documents as m
@@ -19,7 +20,7 @@ from hklv_rules.models.common import Extracted, NotaryInfo, Person
 from .classify import PageKind
 from .common_fields import document_language, has_translation, notary_info, page_language
 from .confidence import AGREE_CAP, DISAGREE, MRZ_INVALID, MRZ_VALID, SINGLE_READER_FACTOR, VL_ONLY, date_field, derived, score_text, text_field
-from .dates import has_month_name, parse_boxed_date, parse_date, parse_words_date
+from .dates import has_month_name, parse_amount_words, parse_boxed_date, parse_date, parse_words_date
 from .group import PageGroup
 from .mrz import MrzResult
 from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labeled, levenshtein, reading_order, same_row, squash
@@ -27,7 +28,7 @@ from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labe
 NAME = r"[A-Za-z][A-Za-z .\-']{1,60}"
 # Labels that often follow a name on the same printed line.
 NAME_STOPS = (
-    r"Father", r"Mother", r"Husband", r"Spouse", r"Date", r"Sex", r"Gender", r"Nationality", r"Place",
+    r"Father", r"Mother", r"Husband", r"Spouse", r"Date", r"Sex", r"Gender", r"Nationality", r"Country", r"Place",
     r"Address", r"NID", r"ID\s*No", r"A/C", r"Birth", r"Blood", r"Relation", r"S/O", r"D/O", r"W/O", r"Son\s+of",
 )
 
@@ -71,6 +72,20 @@ def _text(group: PageGroup, labels: Sequence[str], pattern: str, pages: Sequence
 # A date value must contain a 4-digit year. Lines without one (another label such as
 # "Holder's Signature" between "Date of Expiry" and "03JUN2033") are skipped.
 DATE_VALUE = r".{0,30}\d{4}.{0,15}"
+
+# A person's own 'Name' label, never a relative's: OCR often drops the apostrophe
+# ('Fathers Name', 'Father s Name'), so every spelling is excluded.
+_RELATIVES = ("Father", "Mother", "Husband", "Spouse", "Guardian")
+OWN_NAME = "".join(
+    f"(?<!{who}{tail} )" for who in _RELATIVES for tail in ("'s", "’s", "s", " s", "")
+) + r"\bName\b(?!\s*of)"
+# A letter's own date ('Date: 10/11/2026', 'Dated ...'), not 'Account Opening Date' or 'Date of ...'.
+# 'Print Date' counts: bank letters printed from the core system carry only that.
+LETTER_DATE = [
+    "".join(f"(?<!{w} )" for w in ("Opening", "Open", "Value", "Maturity", "Starting", "Expiry", "Birth", "Transaction"))
+    + r"\bDate(?![A-Za-z])(?!\s*of)",  # 'Print Date15-Jun-2025': OCR lost the space
+    r"\bDated\b",
+]
 
 
 def _date(
@@ -504,9 +519,9 @@ def nid(group: PageGroup, doc_id: str) -> m.NationalId:
     mrz = _mrz(group)
     translation = _translation_pages(group)
     card_pages = [p for p in group.pages if p not in translation] or group.pages
-    name = _name(group, [r"Name"], pages=card_pages)
+    name = _name(group, [OWN_NAME], pages=card_pages)
     if name.value is None:
-        name = _name(group, [r"Name"])
+        name = _name(group, [OWN_NAME])
     if mrz is not None:
         page_no = _mrz_page(group, mrz)
         name = _agree_with_mrz(name, mrz.full_name)
@@ -538,7 +553,7 @@ _NOT_PARENT = "".join(f"(?<!{p} )" for p in ("Father's", "Fathers", "Father", "M
 BRN_LABELS = [
     _NOT_PARENT + r"Birth\s*Registration\s*(?:Number|No)\.?",
     _NOT_PARENT + r"(?<!Birth )Registration\s*No\.?",
-    _NOT_PARENT + r"BR\s*(?:Number|No)\.?",
+    _NOT_PARENT + r"BRN?\s*(?:\w{0,3}umber|No)\.?",  # also OCR slips such as 'BRNMiumber'
 ]
 BRN_VALUE = r"\d(?:\s?\d){15,16}(?!\s?\d)"  # exactly 16-17 digits, never cut from a longer run
 # The lookup as before these forms were added, tried first and unchanged.
@@ -573,7 +588,7 @@ def _registration_number(group: PageGroup, pages: Sequence[PageReading]) -> Extr
 
 
 # Any registration-number label, a parent's included (to find and set aside the parents').
-_ANY_BRN_LABEL = re.compile(r"Birth\s*Registration\s*(?:Number|No)|Registration\s*No|\bBR\s*(?:Number|No)\b", re.IGNORECASE)
+_ANY_BRN_LABEL = re.compile(r"Birth\s*Registration\s*(?:Number|No)|Registration\s*No|\bBRN?\s*(?:\w{0,3}umber|No)\b", re.IGNORECASE)
 
 
 _IN_WORDS = re.compile(r"\bIn\s*Words?\s*[:：\-]?\s*(.+)$", re.IGNORECASE)
@@ -645,6 +660,7 @@ def _birth_date(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[dat
                 continue  # another field's box ("Date of Issuance: ..."), not this one's value
             # Stop at the next field on the same line ("... Date of Registration: 12/09/2001").
             value = _NEXT_FIELD.split(value, maxsplit=1)[0].strip()
+            value = value.replace("ß", "B")  # OCR reads a small-print 'b' as 'ß' ('25th feß, 2002')
             if not has_month_name(value):
                 continue  # a date in words always names its month
             numeric, words = (parse_date(value), parse_words_date(value)) if value else (None, None)
@@ -663,10 +679,11 @@ def birth_certificate(group: PageGroup, doc_id: str) -> m.BirthCertificate:
         doc_id=doc_id,
         pages=group.page_nos,
         registration_number=_registration_number(group, english),
-        name=_name(group, [r"(?<!Father's )(?<!Mother's )Name(?:\s*of\s*(?:the\s*)?Child)?"], pages=english),
+        name=_name(group, [r"Name\s*of\s*(?:the\s*)?Child", OWN_NAME], pages=english),
         date_of_birth=_birth_date(group, english),
-        father_name=_name(group, [r"Father'?s?\s*Name"], pages=english),
-        mother_name=_name(group, [r"Mother'?s?\s*Name"], pages=english),
+        # Small print on old forms reads as 'Fathar's' / 'Motfiar's': a few letters may differ.
+        father_name=_name(group, [r"\bFa[a-z]{2,3}r'?s?\s*Name"], pages=english),
+        mother_name=_name(group, [r"\bMo[a-z]{2,4}r'?s?\s*Name"], pages=english),
         language=document_language(group.pages),
         has_english_translation=has_translation(group.pages),
         notary=_notary(group),
@@ -678,7 +695,7 @@ def death_certificate(group: PageGroup, doc_id: str) -> m.DeathCertificate:
         doc_id=doc_id,
         pages=group.page_nos,
         registration_number=_text(group, [r"Death\s*Registration\s*(?:Number|No)\.?", r"Registration\s*No\.?"], r"\d[\d ]{8,20}\d"),
-        deceased_name=_name(group, [r"Name\s*of\s*(?:the\s*)?Deceased", r"Deceased'?s?\s*Name", r"Name"]),
+        deceased_name=_name(group, [r"Name\s*of\s*(?:the\s*)?Deceased", r"Deceased'?s?\s*Name", OWN_NAME]),
         date_of_death=_date(group, [r"Date\s*of\s*Death"]),
         language=document_language(group.pages),
         has_english_translation=has_translation(group.pages),
@@ -687,6 +704,33 @@ def death_certificate(group: PageGroup, doc_id: str) -> m.DeathCertificate:
 
 
 _RELATION_WORDS = ("SELF", "HIMSELF", "HERSELF", "APPLICANT", "FATHER", "MOTHER", "BROTHER", "SISTER", "SON", "DAUGHTER", "WIFE", "HUSBAND", "SPOUSE")
+
+
+_SELF_WORDS = {"SELF", "HERSELF", "HIMSELF", "APPLICANT"}
+_ROW_RELATIONS = _SELF_WORDS | {"FATHER", "MOTHER"}
+
+
+def _relation_key(text: str | None) -> str:
+    return re.sub(r"[^A-Z]", "", (text or "").upper())
+
+
+def _rows_the_table_reader_missed(group: PageGroup, members: list[m.FrcMember]) -> list[m.FrcMember]:
+    """The layout reader sometimes returns only the first rows of a family table. A relation
+    cell ('FATHER') that the line reader saw but no table row holds becomes a row whose
+    relation is unreadable, so the rules FLAG it for a person instead of FAILing 'no FATHER
+    row'. Column headers ('FATHER' as a heading beside 'RELATION') are not cells."""
+    from collections import Counter
+
+    seen: Counter[str] = Counter()
+    for page in group.pages:
+        headers = [ln for ln in page.lines if re.search(r"RELATION", ln.text, re.IGNORECASE)]
+        for ln in page.lines:
+            key = _relation_key(ln.text)
+            if key in _ROW_RELATIONS and re.fullmatch(r"[A-Za-z]+", ln.text.strip()) and not any(same_row(ln, h) for h in headers):
+                seen[key] += 1
+    have = Counter(_relation_key(mb.relation.value) for mb in members)
+    missed = [key for key, n in seen.items() for _ in range(n - have[key])]
+    return [m.FrcMember(relation=Extracted[str](value=key, confidence=VL_ONLY)) for key in missed]
 
 
 def frc(group: PageGroup, doc_id: str) -> m.FamilyRelationshipCertificate:
@@ -720,6 +764,14 @@ def frc(group: PageGroup, doc_id: str) -> m.FamilyRelationshipCertificate:
                         date_of_birth=date_field(dob, _table_field(page, row[dob_col]).confidence, page.page_no) if dob else Extracted[date](),
                     )
                 )
+    members += _rows_the_table_reader_missed(group, members)
+    if not any(_relation_key(mb.relation.value) in _SELF_WORDS for mb in members):
+        # Some councils name the applicant under the table instead of in a SELF row.
+        applicant, page = _first(group, lambda p: find_labeled(p, [r"Applicant'?s?\s*Name"], value_pattern=NAME, stop_words=NAME_STOPS))
+        if applicant is not None:
+            # The relation is implied by the printed label, not read from a cell: as sure as the label line.
+            relation = Extracted[str](value="APPLICANT", confidence=round(min(applicant.score, AGREE_CAP), 4), source_page=applicant.page_no)
+            members.append(m.FrcMember(name=text_field(applicant, page), relation=relation))
     issue_date = _date(group, [r"Date\s*of\s*Issue", r"Issue\s*Date", r"Issued\s*on"])
     if issue_date.value is None:
         # Letter-style header: "Ref: ABC/1/2026  Date: 01-10-2026" (first "Date", top of page).
@@ -763,7 +815,7 @@ def affidavit(group: PageGroup, doc_id: str) -> m.Affidavit:
     states_same = (
         Extracted[bool](value=True, confidence=round(min(max(ln.score for _, ln in same), AGREE_CAP), 4), source_page=same[0][0].page_no)
         if same
-        else Extracted[bool](value=False, confidence=0.8, source_page=group.pages[0].page_no)
+        else Extracted[bool]()  # absent phrase: unknown (FLAG), never a confident "no"
     )
     # Two tables: names as written in some documents, then the different spelling elsewhere.
     tables = [(page, t) for page in group.pages for t in _tables(page)]
@@ -866,7 +918,7 @@ def bank_solvency(group: PageGroup, doc_id: str) -> m.BankSolvency:
         pages=group.page_nos,
         account_holder=holder,
         account_number=_account_number(group),
-        letter_date=_date(group, [r"Date", r"Dated"]),
+        letter_date=_date(group, LETTER_DATE),
     )
 
 
@@ -874,7 +926,7 @@ def bank_statement(group: PageGroup, doc_id: str) -> m.BankStatement:
     return m.BankStatement(
         doc_id=doc_id,
         pages=group.page_nos,
-        account_holder=_name(group, [r"Account\s*Name", r"A/?C\s*Name", r"Customer\s*Name", r"Account\s*Holder", r"Name"]),
+        account_holder=_name(group, [r"Account\s*Name", r"A/?C\s*Name", r"Customer\s*Name", r"Account\s*Holder", OWN_NAME]),
         account_number=_account_number(group),
         statement_date=_date(group, [r"Generation\s*Date", r"Generated\s*(?:on|Date)", r"As\s*on", r"Print(?:ing)?\s*Date", r"Printed\s*on", r"Statement\s*Date"]),
     )
@@ -910,7 +962,7 @@ def employment_certificate(group: PageGroup, doc_id: str) -> m.EmploymentCertifi
         doc_id=doc_id,
         pages=group.page_nos,
         employee_name=_holder_from_sentence(group),
-        issue_date=_date(group, [r"Date", r"Dated"]),
+        issue_date=_date(group, LETTER_DATE),
         currently_employed=(
             Extracted[bool](value=True, confidence=round(min(employed[0][1].score, AGREE_CAP), 4), source_page=employed[0][0].page_no)
             if employed
@@ -934,33 +986,79 @@ def tin_certificate(group: PageGroup, doc_id: str) -> m.TinCertificate:
     return m.TinCertificate(
         doc_id=doc_id,
         pages=group.page_nos,
-        taxpayer_name=_name(group, [r"(?<!Father's )(?<!Mother's )Name(?!\s*of)",r"Taxpayer'?s?\s*Name"]),
+        taxpayer_name=_name(group, [r"Taxpayer'?s?\s*Name", OWN_NAME]),
         tin_printed=_text(group, [r"\bTIN\b(?:\s*No\.?)?"], r"\d{12}"),
         qr_decoded=qr is not None,
         tin_from_qr=tin_from_qr,
     )
 
 
-def _amount(group: PageGroup, labels: Sequence[str]):
-    from decimal import Decimal, InvalidOperation
+# An amount, optionally after a currency mark ('Tk. 12,000', 'BDT 15,000.00', '1,00,000/-').
+_AMOUNT_VALUE = r"(?:Tk\.?|BDT|Taka|৳)?\s*[\d,]+(?:\.\d{1,2})?(?:\s*/-)?"
 
-    found, page = _first(group, lambda p: find_labeled(p, labels, value_pattern=r"[\d,]+(?:\.\d{1,2})?"))
+
+def _amount(group: PageGroup, labels: Sequence[str]) -> Extracted[Decimal]:
+    found, page = _first(group, lambda p: find_labeled(p, labels, value_pattern=_AMOUNT_VALUE))
     if found is None:
-        return Extracted()
+        return Extracted[Decimal]()
+    number = re.search(r"\d[\d,]*(?:\.\d{1,2})?", found.value)
     try:
-        value = Decimal(found.value.replace(",", ""))
-    except InvalidOperation:
-        return Extracted()
-    return Extracted(value=value, confidence=round(score_text(found, page), 4), source_page=found.page_no)
+        value = Decimal(number.group(0).replace(",", ""))
+    except (AttributeError, InvalidOperation):
+        return Extracted[Decimal]()
+    return Extracted[Decimal](value=value, confidence=round(score_text(found, page), 4), source_page=found.page_no)
+
+
+# A-challan number, e.g. '2526-0012345678' (4-digit year code, 10-digit serial).
+_ACHALLAN_NO = re.compile(r"(?<!\d)\d{4}\s*-\s*\d{10}(?!\d)")
 
 
 def tax_challan(group: PageGroup, doc_id: str) -> m.IncomeTaxChallan:
-    return m.IncomeTaxChallan(
-        doc_id=doc_id,
-        pages=group.page_nos,
-        challan_number=_text(group, [r"Challan\s*(?:No|Number)\.?", r"Transaction\s*ID"], r"[A-Z0-9][A-Z0-9\-]{5,30}"),
-        printed_amount=_amount(group, [r"Amount", r"Total\s*Amount", r"Taka"]),
+    # The QR carries the challan number checksum-protected; the printed text is the fallback.
+    in_qr = next(
+        ((mt, p.page_no) for p in group.pages for b in p.barcodes
+         if b.format.upper().startswith("QR") and (mt := _ACHALLAN_NO.search(b.text))),
+        None,
     )
+    if in_qr:
+        number = Extracted[str](value=re.sub(r"\s", "", in_qr[0].group(0)), confidence=MRZ_VALID, source_page=in_qr[1])
+    else:
+        number = _text(group, [r"Challan\s*(?:No|Number)\.?", r"Transaction\s*ID"], r"[A-Z0-9][A-Z0-9\-]{5,30}")
+    if not number.found:
+        # e-Payment challans label the number in Bangla only: a line that is exactly an A-challan number.
+        line = next(((ln, p) for p in group.pages for ln in p.lines if _ACHALLAN_NO.fullmatch(ln.text.strip())), None)
+        if line:
+            ln, page = line
+            number = text_field(Found(re.sub(r"\s", "", ln.text), ln.score, page.page_no), page)
+            # The slip prints the number twice; a second line with the same digits confirms it
+            # when the layout reader garbled it.
+            wanted = re.sub(r"\D", "", ln.text)
+            if sum(re.sub(r"\D", "", o.text) == wanted for o in page.lines) >= 2:
+                number = number.model_copy(update={"confidence": round(min(ln.score, AGREE_CAP), 4)})
+    # 'Total Amount' first; never the line under 'Amount in words'.
+    amount = _amount(group, [r"Total\s*Amount", r"Amount(?!\s*in\s*words)", r"Taka(?!\s*in\s*words)"])
+    if not amount.found:
+        amount = _amount_with_words(group)
+    return m.IncomeTaxChallan(doc_id=doc_id, pages=group.page_nos, challan_number=number, printed_amount=amount)
+
+
+_AMOUNT_AND_WORDS = re.compile(r"(\d[\d,]*(?:\.\d{1,2})?)\s*\(([A-Za-z ]+?Taka\s*Only)\)", re.IGNORECASE)
+
+
+def _amount_with_words(group: PageGroup) -> Extracted[Decimal]:
+    """'3000.00 (Three Thousand Taka Only)' with no English label. Trusted only when the
+    digits and the words agree; otherwise it is evidence for the reviewer (FLAG), because a
+    misread amount would FAIL TAX-04 against the website."""
+    for page in group.pages:
+        for ln in page.lines:
+            mt = _AMOUNT_AND_WORDS.search(ln.text)
+            if not mt:
+                continue
+            value = Decimal(mt.group(1).replace(",", ""))
+            agree = parse_amount_words(mt.group(2)) == value
+            conf = min(ln.score, AGREE_CAP) if agree else VL_ONLY
+            return Extracted[Decimal](value=value, confidence=round(conf, 4), source_page=page.page_no)
+    return Extracted[Decimal]()
 
 
 def tax_acknowledgement(group: PageGroup, doc_id: str) -> m.IncomeTaxAcknowledgement:
@@ -977,6 +1075,35 @@ def tax_certificate(group: PageGroup, doc_id: str) -> m.IncomeTaxCertificate:
 
 
 # --- language test (optional) ------------------------------------------------------------
+
+
+def _cell_under(group: PageGroup, header: str, accept) -> tuple[Found, PageReading] | None:
+    """A table header cell matching `header` exactly, and the first line below it that
+    overlaps its column and that `accept` takes: the cell under it, not the leftmost value
+    of the next row."""
+    for page in group.pages:
+        for h in page.lines:
+            if not re.fullmatch(header, h.text.strip(), re.IGNORECASE):
+                continue
+            below = sorted(
+                (ln for ln in page.lines if 0 < ln.box[1] - h.box[3] < 3 * (h.box[3] - h.box[1]) and ln.box[0] < h.box[2] and ln.box[2] > h.box[0]),
+                key=lambda ln: ln.box[1],
+            )
+            for ln in below:
+                if accept(clean_value(ln.text)):
+                    return Found(clean_value(ln.text), ln.score, page.page_no), page
+    return None
+
+
+def _name_under(group: PageGroup, header: str) -> Extracted[str]:
+    stops = re.compile(r"(?:" + "|".join(NAME_STOPS) + r")\b", re.IGNORECASE)
+    cell = _cell_under(group, header, lambda t: bool(re.fullmatch(NAME, t)) and not stops.match(t))
+    return text_field(*cell) if cell else Extracted[str]()
+
+
+def _date_under(group: PageGroup, header: str) -> Extracted[date]:
+    cell = _cell_under(group, header, lambda t: parse_date(t) is not None)
+    return date_field(parse_date(cell[0].value), score_text(*cell), cell[0].page_no) if cell else Extracted[date]()
 
 
 def language_test(group: PageGroup, doc_id: str) -> m.LanguageTest:
@@ -999,16 +1126,23 @@ def language_test(group: PageGroup, doc_id: str) -> m.LanguageTest:
             source_page=family.source_page,
         )
     else:
-        name = _name(group, [r"Candidate'?s?\s*Name", r"(?<!Family )(?<!First )Name(?!\s*of)"])
+        name = _name(group, [r"Candidate'?s?\s*Name", "(?<!Family )(?<!First )" + OWN_NAME])
+    if not name.found:
+        name = _name_under(group, "Name")  # TOPIK score report: Name | Gender | Country | Date of Birth
     test_date = _date(group, [r"Test\s*Date", r"Date\s*of\s*Test", r"Date\s*of\s*(?:Issue|Exam(?:ination)?)", r"Issue\s*Date"])
     if test_date.value is None and "IELTS" in text.upper():
         test_date = _date(group, [r"(?<!of )\bDate\b(?!\s*of)"])  # IELTS TRF header: "Date 12/OCT/2026"
+    if test_date.value is None:
+        test_date = _date_under(group, r"Test\s*Held\s*/\s*Test\s*Date|Test\s*Date")
+    dob = _date(group, [r"Date\s*of\s*Birth", r"Birth\s*Date"])
+    if dob.value is None:
+        dob = _date_under(group, r"Date\s*of\s*Birth")
     return m.LanguageTest(
         doc_id=doc_id,
         pages=group.page_nos,
         test=kind or Extracted[m.LanguageTestKind](),
         candidate_name=name,
-        date_of_birth=_date(group, [r"Date\s*of\s*Birth", r"Birth\s*Date"]),
+        date_of_birth=dob,
         test_date=test_date,
     )
 

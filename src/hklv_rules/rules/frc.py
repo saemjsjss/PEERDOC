@@ -58,8 +58,22 @@ def _norm_text(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.upper()).split())
 
 
-def _norm_relation(text: str) -> str:
-    return re.sub(r"[^A-Z]", "", text.upper())
+_BANGLA_RELATIONS = {
+    "পিতা": "FATHER", "বাবা": "FATHER", "মাতা": "MOTHER", "মা": "MOTHER",
+    "নিজ": "SELF", "স্বয়ং": "SELF", "আবেদনকারী": "APPLICANT",
+}
+# 'Father-in-law', 'Step Mother', 'Grand Father' are other people.
+_NOT_THE_PARENT = {"IN", "LAW", "STEP", "GRAND"}
+
+
+def _relation_words(text: str) -> set[str] | None:
+    """The relation's words ('Father (Late)' -> {FATHER, LATE}); None if it is in a script
+    this can't interpret (an unknown Bangla word), so the caller treats it as unreadable."""
+    words = set(re.findall(r"[A-Z]+", text.upper()))
+    words |= {v for k, v in _BANGLA_RELATIONS.items() if re.search(rf"(?<!\w){k}(?!\w)", text)}
+    if not words and re.search(r"[^\W\d_]", text):
+        return None
+    return set() if words & _NOT_THE_PARENT else words
 
 
 # --- FRC-01 Issuer ----------------------------------------------------------------
@@ -160,10 +174,12 @@ def _rows_with_relation(
         if not m.relation.is_reliable(ctx.threshold):
             unreadable.append(m)
             continue
-        rel = _norm_relation(m.relation.value)
-        if rel in wanted:
+        words = _relation_words(m.relation.value)
+        if words is None:
+            unreadable.append(m)
+        elif words & wanted:
             matched.append(m)
-        elif rel in near:
+        elif words & near:
             near_matched.append(m)
     return matched, near_matched, unreadable
 

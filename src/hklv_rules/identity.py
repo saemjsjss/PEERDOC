@@ -10,7 +10,7 @@ from enum import Enum
 from .context import EvaluationContext
 from .models import Affidavit, Extracted, Person
 from .models.common import Frozen
-from .names import normalize_name
+from .names import normalize_name, same_name
 
 ALL_PEOPLE = (Person.STUDENT, Person.FATHER, Person.MOTHER)
 
@@ -42,7 +42,7 @@ def compare_name(observed: Extracted[str], person: Person, ctx: EvaluationContex
         return NameComparison(
             kind=MatchKind.UNCERTAIN, reason=f"{anchor.describe()} is uncertain: {anchor.note}"
         )
-    if normalize_name(observed.value) == normalize_name(anchor.name):
+    if same_name(observed.value, anchor.name):
         return NameComparison(kind=MatchKind.EXACT, reason=f"'{observed.value}' matches {anchor.describe()}")
     kind, why = affidavit_bridge(ctx, person, anchor.name, observed.value)
     if kind is MatchKind.AFFIDAVIT:

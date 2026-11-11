@@ -3,11 +3,12 @@
 import asyncio
 import threading
 import time
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 from reading_builders import make_page, qr
-from test_api import PDF, passport_and_photo
+from test_api import HKLV_HEADER, PDF, passport_and_photo
 from test_online import FOUND, URL, FakeWeb
 
 import hklv_api.jobs as jobs
@@ -52,7 +53,7 @@ def client(monkeypatch):
     monkeypatch.setenv("HKLV_LOAD_MODELS", "0")
     app.state.reader = None
     app.state.fetch = None
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1", headers=HKLV_HEADER) as c:
         yield c
     app.state.reader = None
     app.state.fetch = None
@@ -130,13 +131,9 @@ def test_second_job_waits_in_the_queue_and_can_be_cancelled(client):
     assert reader.calls == 1  # the cancelled job never ran
 
 
-def test_a_running_job_cannot_be_deleted_but_a_finished_one_can(client):
-    reader = GatedReader(hold=True)
-    app.state.reader = reader
+def test_a_finished_job_can_be_deleted(client):
+    app.state.reader = GatedReader()
     job_id = submit(client).json()["job_id"]
-    assert reader.entered.wait(5)
-    assert client.delete(f"/jobs/{job_id}").status_code == 409
-    reader.gate.set()
     wait_for(client, job_id, "done")
     assert client.delete(f"/jobs/{job_id}").status_code == 204
     assert client.get(f"/jobs/{job_id}").status_code == 404
@@ -178,7 +175,7 @@ def test_full_queue_is_503_and_leaves_no_files(client, monkeypatch, tmp_path):
     assert submit(client).status_code == 202  # waiting (1 of 1)
     r = submit(client)
     assert r.status_code == 503
-    assert len(list(tmp_path.glob("hklv-case-*"))) == 2  # running + waiting; the rejected upload left nothing
+    assert len(list(tmp_path.glob("*/hklv-case-*"))) == 2  # running + waiting; the rejected upload left nothing
     reader.gate.set()
 
 
@@ -224,7 +221,7 @@ def test_client_gone_before_queueing_leaves_no_job_and_no_files(client, monkeypa
     r = submit(client)
     assert r.status_code == 499
     assert app.state.jobs.jobs == {} and reader.calls == 0
-    assert list(tmp_path.glob("hklv-case-*")) == []
+    assert list(tmp_path.glob("**/hklv-case-*")) == []
 
 
 def test_expired_verdicts_are_dropped_without_any_request(client, monkeypatch):
@@ -258,3 +255,76 @@ def test_verify_waits_for_the_case_being_read(client):
     t.join(10)
     assert results["r"].status_code == 200 and reader.calls == 2
     wait_for(client, job_id, "done")
+
+
+# --- resource limits and cancelling (review 2026-11-12) ------------------------------------------
+
+
+def test_a_running_job_is_cancelled_after_the_current_page(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("HKLV_WORK_DIR", str(tmp_path))
+    reader = GatedReader(hold=True)
+    app.state.reader = reader
+    job_id = submit(client).json()["job_id"]
+    assert reader.entered.wait(5)
+    job = app.state.jobs.jobs[job_id]
+    assert client.delete(f"/jobs/{job_id}").status_code == 204
+    assert client.get(f"/jobs/{job_id}").status_code == 404
+    reader.gate.set()  # the reader finishes its page; the next progress report stops the job
+    end = time.time() + 5
+    while not job.ended.is_set() and time.time() < end:
+        time.sleep(0.02)
+    assert job.error == "cancelled" and job.result is None and job.pages_done == 1
+    assert list(tmp_path.glob("*/hklv-case-*")) == []
+    # The worker is free for the next case.
+    app.state.reader = GatedReader()
+    wait_for(client, submit(client).json()["job_id"], "done")
+
+
+def test_upload_over_the_page_limit_is_413_and_leaves_no_files(client, monkeypatch, tmp_path):
+    import hklv_api.app as api
+
+    monkeypatch.setenv("HKLV_WORK_DIR", str(tmp_path))
+    reader = GatedReader(pages_per_file=api.MAX_PAGES // 2 + 1)  # 2 files: just over the limit
+    app.state.reader = reader
+    r = submit(client)
+    assert r.status_code == 413 and f"limit {api.MAX_PAGES}" in r.json()["detail"]
+    assert reader.calls == 0 and list(tmp_path.glob("*/hklv-case-*")) == []
+
+
+def test_verify_counts_against_the_waiting_limit(client, monkeypatch):
+    monkeypatch.setattr(jobs, "MAX_WAITING_JOBS", 1)
+    reader = GatedReader(hold=True)
+    app.state.reader = reader
+    submit(client)  # running
+    assert reader.entered.wait(5)
+    assert submit(client).status_code == 202  # waiting (1 of 1)
+    r = client.post("/verify", files=[("files", ("a.pdf", PDF, "application/pdf"))], data={"online": "false"})
+    assert r.status_code == 503
+    reader.gate.set()
+
+
+def test_job_waiting_for_the_reader_is_not_shown_as_running(tmp_path):
+    from types import SimpleNamespace
+
+    (tmp_path / "a.pdf").write_bytes(PDF)
+    manager = jobs.JobManager()
+    job = jobs.Job(id="x", folder=tmp_path, files=jobs.SavedFiles(accepted=["a.pdf"]), case_id="c", evaluation_date=date(2026, 11, 11), online=False, pages_total=2)
+    state = SimpleNamespace(reader=GatedReader(), fetch=None)
+
+    async def scenario():
+        await manager.case_lock.acquire()  # e.g. another case is being read
+        task = asyncio.create_task(manager._run(job, SimpleNamespace(state=state)))
+        await asyncio.sleep(0.05)
+        waiting = (job.status, job.stage, job.started)
+        manager.case_lock.release()
+        await task
+        return waiting
+
+    assert asyncio.run(scenario()) == (jobs.JobStatus.QUEUED, jobs.Stage.WAITING, None)
+    assert job.status is jobs.JobStatus.DONE and job.started is not None
+
+
+def test_job_view_carries_the_server_id(client):
+    app.state.reader = GatedReader()
+    job = submit(client).json()
+    assert job["server_id"] == client.get("/health").json()["server_id"]

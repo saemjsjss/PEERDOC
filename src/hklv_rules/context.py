@@ -16,7 +16,7 @@ class EvaluationContext:
     affidavits: tuple[Affidavit, ...]
 
     @classmethod
-    def build(cls, case: CaseFile, threshold: float = DEFAULT_CONFIDENCE_THRESHOLD) -> "EvaluationContext":
+    def build(cls, case: CaseFile, threshold: float = DEFAULT_CONFIDENCE_THRESHOLD) -> EvaluationContext:
         return cls(
             case=case,
             anchors=establish_anchors(case, threshold),

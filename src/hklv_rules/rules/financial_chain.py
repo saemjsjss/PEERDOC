@@ -3,18 +3,22 @@
 The TIN Taxpayer and the holder of the income document must be the same parent. The
 income document is the Trade License or, instead of it, an Employment Certificate
 (REQ-06). Bank documents are deliberately NOT part of this chain.
+
+Overlaps removed 2026-11-12: CHAIN-01 (TIN name == income-document name) was the same check
+as TIN-03, and the income document being the student's is TRADE-04 / EMP-05's job, so
+CHAIN-03 checks only the TIN.
 """
 
 from __future__ import annotations
 
 from ..context import EvaluationContext
-from ..identity import Identification, IdStatus, MatchKind, affidavit_bridge, identify
+from ..identity import Identification, IdStatus, identify
 from ..models import EmploymentCertificate, Extracted, Outcome, Person, RuleResult, TinCertificate, TradeLicense
 from ..models.common import Frozen
 from ..names import normalize_name
 from ._evidence import ev
 
-CHAIN_01, CHAIN_02, CHAIN_03 = "CHAIN-01", "CHAIN-02", "CHAIN-03"
+CHAIN_02, CHAIN_03 = "CHAIN-02", "CHAIN-03"
 _PARENTS = (Person.FATHER, Person.MOTHER)
 
 
@@ -28,7 +32,7 @@ class _Income(Frozen):
     name: Extracted[str]
 
     @classmethod
-    def of(cls, doc: TradeLicense | EmploymentCertificate) -> "_Income":
+    def of(cls, doc: TradeLicense | EmploymentCertificate) -> _Income:
         if isinstance(doc, TradeLicense):
             return cls(doc_id=doc.doc_id, label="Trade License", holder="owner", field="owner_name", name=doc.owner_name)
         return cls(
@@ -50,7 +54,7 @@ def check_financial_chain(ctx: EvaluationContext) -> list[RuleResult]:
 
     gap = _structural_problem(tins, incomes)
     if gap is not None and gap[0] is Outcome.FAIL:
-        return [RuleResult(rule_id=r, outcome=gap[0], reason=gap[1]) for r in (CHAIN_01, CHAIN_02, CHAIN_03)]
+        return [RuleResult(rule_id=r, outcome=gap[0], reason=gap[1]) for r in (CHAIN_02, CHAIN_03)]
     if gap is not None:
         return _gated(ctx, tins, incomes, gap[1])
 
@@ -72,9 +76,8 @@ def check_financial_chain(ctx: EvaluationContext) -> list[RuleResult]:
     tin_id = identify(tin_name, ctx)
     income_id = identify(income_name, ctx)
     return [
-        _chain_01(ctx, tin_name.value, income_name.value, income, evidence),
         _chain_02(tin_id, income_id, income.label, evidence),
-        _chain_03(tin_id, income_id, income.label, evidence),
+        _chain_03(tin_id, evidence),
     ]
 
 
@@ -102,7 +105,7 @@ def _settled(names: list[Extracted[str]], ctx: EvaluationContext) -> Person | Id
 def _gated(
     ctx: EvaluationContext, tins: list, incomes: list[_Income], why: str, evidence=()
 ) -> list[RuleResult]:
-    """The chain can't be compared (a link is unreadable or duplicated), so CHAIN-01 FLAGs.
+    """The chain can't be compared (a link is unreadable or duplicated), so the rules FLAG.
 
     CHAIN-02 and CHAIN-03 still FAIL when one link on its own already decides them: a link
     reliably in the student's name, or one that reliably matches no family member.
@@ -126,15 +129,15 @@ def _gated(
     def fail(rule_id: str, reason: str) -> RuleResult:
         return RuleResult(rule_id=rule_id, outcome=Outcome.FAIL, reason=f"{reason} ({why})", evidence=evidence)
 
-    out = [flag(CHAIN_01)]
+    out = []
     if students or strangers:
         parts = [f"{label} is in the student's name" for label in students]
         parts += [f"{label} name matches no parent" for label in strangers]
         out.append(fail(CHAIN_02, "; ".join(parts) + "; the chain must belong to one parent"))
     else:
         out.append(flag(CHAIN_02))
-    if students:
-        out.append(fail(CHAIN_03, f"{' and '.join(students)} in the student's name (StudentRef); must be a parent"))
+    if "TIN" in students:
+        out.append(fail(CHAIN_03, "TIN in the student's name (StudentRef); must be a parent"))
     else:
         out.append(flag(CHAIN_03))
     return out
@@ -152,41 +155,6 @@ def _structural_problem(tins: list, incomes: list[_Income]) -> tuple[Outcome, st
             f"More than one {' and more than one '.join(extra)} found; reviewer must pick which forms the chain",
         )
     return None
-
-
-def _chain_01(ctx: EvaluationContext, tin: str, other: str, income: _Income, evidence) -> RuleResult:
-    who = income.describe
-    if normalize_name(tin) == normalize_name(other):
-        return RuleResult(
-            rule_id=CHAIN_01,
-            outcome=Outcome.PASS,
-            reason=f"TIN taxpayer '{tin}' and {who} '{other}' are identical",
-            evidence=evidence,
-        )
-    # A same-person affidavit for either parent can bridge a spelling difference (5.2).
-    verdicts = [affidavit_bridge(ctx, p, tin, other) for p in _PARENTS]
-    for kind, why in verdicts:
-        if kind is MatchKind.AFFIDAVIT:
-            return RuleResult(
-                rule_id=CHAIN_01,
-                outcome=Outcome.PASS,
-                reason=f"TIN taxpayer '{tin}' and {who} '{other}' differ in spelling, covered by {why}",
-                evidence=evidence,
-            )
-    unsure = [why for kind, why in verdicts if kind is MatchKind.UNCERTAIN]
-    if unsure:
-        return RuleResult(
-            rule_id=CHAIN_01,
-            outcome=Outcome.FLAG,
-            reason=f"TIN taxpayer '{tin}' and {who} '{other}' differ; {'; '.join(unsure)}",
-            evidence=evidence,
-        )
-    return RuleResult(
-        rule_id=CHAIN_01,
-        outcome=Outcome.FAIL,
-        reason=f"TIN taxpayer '{tin}' and {who} '{other}' are not identical",
-        evidence=evidence,
-    )
 
 
 def _label(i: Identification) -> str:
@@ -219,15 +187,12 @@ def _chain_02(tin: Identification, other: Identification, label: str, evidence) 
     return result(Outcome.FLAG, "Could not confirm which parent owns the chain: " + "; ".join(unsure))
 
 
-def _chain_03(tin: Identification, other: Identification, label: str, evidence) -> RuleResult:
+def _chain_03(tin: Identification, evidence) -> RuleResult:
     def result(outcome: Outcome, reason: str) -> RuleResult:
         return RuleResult(rule_id=CHAIN_03, outcome=outcome, reason=reason, evidence=evidence)
 
-    pair = (("TIN", tin), (label, other))
-    students = [doc for doc, i in pair if i.person is Person.STUDENT]
-    if students:
-        return result(Outcome.FAIL, f"{' and '.join(students)} in the student's name (StudentRef); must be a parent")
-    unsure = [f"{doc}: {i.reason}" for doc, i in pair if i.status in (IdStatus.AMBIGUOUS, IdStatus.UNCERTAIN)]
-    if unsure:
-        return result(Outcome.FLAG, "Could not rule out the student's name: " + "; ".join(unsure))
-    return result(Outcome.PASS, f"Neither TIN nor {label} is in the student's name")
+    if tin.person is Person.STUDENT:
+        return result(Outcome.FAIL, "TIN in the student's name (StudentRef); must be a parent")
+    if tin.status in (IdStatus.AMBIGUOUS, IdStatus.UNCERTAIN):
+        return result(Outcome.FLAG, f"Could not rule out the student's name: TIN: {tin.reason}")
+    return result(Outcome.PASS, "TIN is not in the student's name")

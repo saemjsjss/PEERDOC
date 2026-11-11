@@ -5,13 +5,22 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# Real applicant documents: personal data, never commit
-SAMPLE DOC/
+# Real applicant documents: personal data, never commit. The folders are listed by name so
+# that any file type dropped into them (.docx, .txt ...) stays out too; the extensions catch
+# scans anywhere else. Bracket patterns make them case-insensitive (git matches case).
+SAMPLE DOC*/
+/4/
 DIFFERENT KIND OF SIMMILAR THINGS/
-*.pdf
-*.jpg
-*.jpeg
-*.png
+*.[pP][dD][fF]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[pP][nN][gG]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[wW][eE][bB][pP]
+*.[hH][eE][iI][cC]
+*.[bB][mM][pP]
+*.[zZ][iI][pP]
 
 # OCR results of real documents: personal data, never commit
 ocr_output/

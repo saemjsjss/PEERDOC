@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, TypeVar, Union
+from typing import Annotated, TypeVar
 
 from pydantic import Field
 
@@ -32,27 +32,7 @@ from .documents import (
 )
 
 Document = Annotated[
-    Union[
-        Passport,
-        Photo,
-        BirthCertificate,
-        NationalId,
-        DeathCertificate,
-        FamilyRelationshipCertificate,
-        Affidavit,
-        BankSolvency,
-        BankStatement,
-        TradeLicense,
-        EmploymentCertificate,
-        TinCertificate,
-        IncomeTaxChallan,
-        IncomeTaxAcknowledgement,
-        IncomeTaxCertificate,
-        EApostille,
-        AcademicCertificate,
-        AcademicTranscript,
-        LanguageTest,
-    ],
+    Passport | Photo | BirthCertificate | NationalId | DeathCertificate | FamilyRelationshipCertificate | Affidavit | BankSolvency | BankStatement | TradeLicense | EmploymentCertificate | TinCertificate | IncomeTaxChallan | IncomeTaxAcknowledgement | IncomeTaxCertificate | EApostille | AcademicCertificate | AcademicTranscript | LanguageTest,
     Field(discriminator="kind"),
 ]
 

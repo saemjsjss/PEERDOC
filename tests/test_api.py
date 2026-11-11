@@ -15,6 +15,8 @@ import hklv_api.uploads as uploads
 from hklv_api.app import app
 from hklv_ocr.reading import CaseReading
 
+HKLV_HEADER = {"X-HKLV": "1"}  # required on POST and DELETE
+
 
 def passport_and_photo() -> CaseReading:
     return CaseReading(
@@ -33,11 +35,13 @@ class FakeReader:
         self.paths: list[Path] = []
         self.existed: list[bool] = []
 
-    async def read_files(self, paths):
+    async def read_files(self, paths, progress=None):
         self.paths = list(paths)
         self.existed = [p.exists() for p in self.paths]
         if self.error:
             raise self.error
+        for _ in self.reading.pages if progress else ():
+            progress(object())
         return self.reading
 
 
@@ -46,7 +50,7 @@ def client(monkeypatch):
     monkeypatch.setenv("HKLV_LOAD_MODELS", "0")
     app.state.reader = None
     app.state.fetch = None
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1", headers=HKLV_HEADER) as c:
         yield c
     app.state.reader = None
     app.state.fetch = None
@@ -79,7 +83,9 @@ def post(client, files, **form):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok", "version": "1.1.0", "models_loaded": False}
+    body = client.get("/health").json()
+    assert body == {"status": "ok", "version": "1.1.0", "models_loaded": False, "server_id": body["server_id"]}
+    assert len(body["server_id"]) >= 8
     use()
     assert client.get("/health").json()["models_loaded"] is True
 
@@ -276,7 +282,7 @@ def test_chunked_upload_without_content_length_is_capped_by_real_bytes(client, m
 
 
 def test_long_non_latin_file_name_is_shortened_not_a_crash(client):
-    reader = use()
+    use()
     name = "\u0995\u09be\u09ae\u09be\u09b2" * 30 + ".pdf"  # 150 Bangla characters, ~450 bytes
     r = post(client, [("files", (name, PDF, "application/pdf"))])
     assert r.status_code == 200, r.text
@@ -397,3 +403,61 @@ def test_reader_keeps_only_recent_page_stats():
 
     assert "deque(maxlen=200)" in Path(readers.__file__).read_text(encoding="utf-8")
     assert isinstance(deque(maxlen=200), deque)
+
+
+# --- cross-site protection, uploads off the event loop, per-instance work folder ---------------
+
+
+def test_post_and_delete_need_the_hklv_header(client):
+    use()
+    del client.headers["X-HKLV"]
+    try:
+        assert client.get("/health").status_code == 200  # reads need no header
+        r = post(client, [("files", ("a.pdf", PDF, "application/pdf"))])
+        assert r.status_code == 403 and "X-HKLV" in r.json()["detail"]
+        assert client.delete("/jobs/anything").status_code == 403
+        assert client.post("/jobs", files=[("files", ("a.pdf", PDF, "application/pdf"))], headers={"X-HKLV": "0"}).status_code == 403
+    finally:
+        client.headers.update(HKLV_HEADER)
+    assert post(client, [("files", ("a.pdf", PDF, "application/pdf"))]).status_code == 200
+
+
+def test_unknown_host_names_are_refused(client):
+    use()
+    assert client.get("http://localhost/health").status_code == 200
+    assert client.get("http://attacker.example/health").status_code == 400  # DNS rebinding
+
+
+def test_upload_disk_work_runs_off_the_event_loop(client, monkeypatch):
+    import asyncio
+    import shutil
+
+    use()
+    threads = []
+    real_move = shutil.move
+
+    def move(src, dst):
+        try:
+            asyncio.get_running_loop()
+            threads.append("event loop")
+        except RuntimeError:
+            threads.append("worker thread")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(shutil, "move", move)
+    assert post(client, [("files", ("a.pdf", PDF, "application/pdf"))]).status_code == 200
+    assert threads == ["worker thread"]
+
+
+def test_startup_sweep_leaves_other_instances_folders_alone(monkeypatch, tmp_path):
+    monkeypatch.setenv("HKLV_LOAD_MODELS", "0")
+    monkeypatch.setenv("HKLV_WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("HKLV_PORT", "8000")
+    mine = tmp_path / "hklv-port-8000" / "hklv-case-old"
+    theirs = tmp_path / "hklv-port-8010" / "hklv-case-live"
+    for folder in (mine, theirs):
+        folder.mkdir(parents=True)
+    app.state.reader = None
+    with TestClient(app):
+        pass
+    assert not mine.exists() and theirs.exists()

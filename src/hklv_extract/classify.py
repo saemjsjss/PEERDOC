@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from hklv_ocr.reading import PageReading
 
+from .common_fields import TRANSLATION_RE
 from .mrz import MrzResult, find_mrz
 from .text import reading_order
 
@@ -59,7 +60,9 @@ def _rx(*patterns: str) -> re.Pattern[str]:
 SIG = {
     "passport": _rx(r"\bPASSPORT\b", r"পাসপোর্ট"),
     "apostille": _rx(r"\bE-?\s?APOSTILLE\b", r"\bAPOSTILLE\b", r"Convention de La Haye"),
-    "nid": _rx(r"NATIONAL\s*ID(?:ENTITY)?\s*CARD", r"\bNID\s*(?:NO|NUMBER|CARD)\b", r"জাতীয়\s*পরিচয়\s*পত্র"),
+    "nid": _rx(r"NATIONAL\s*ID(?:ENTITY)?\s*CARD", r"\bNID\s*CARD\b", r"জাতীয়\s*পরিচয়\s*পত্র"),
+    # A bare 'NID No' is quoted by bank and employer letters too: the weakest NID evidence.
+    "nid_number": _rx(r"\bNID\s*(?:NO|NUMBER)\b"),
     "birth": _rx(r"BIRTH\s*REGISTRATION\s*(?:NUMBER|NO)", r"\bBDRIS\b", r"জন্ম\s*নিবন্ধন"),
     # Older City Corporation / Pourashava certificates (BDR Form-3, titled "Birth Registration
     # Certificate" in a decorative font OCR often garbles): see OLD_STYLE_BIRTH below.
@@ -68,9 +71,10 @@ SIG = {
     # Not plain "Death Registration": every BDRIS birth certificate is issued by the
     # "Registrar of Birth and Death".
     "death": _rx(r"DEATH\s*REGISTRATION\s*(?:NUMBER|NO)", r"DEATH\s*CERTIFICATE", r"DATE\s*OF\s*DEATH", r"মৃত্যু\s*নিবন্ধন\s*সনদ"),
-    "frc": _rx(r"FAMILY\s*RELATIONSHIP\s*CERTIFICATE", r"FAMILY\s*CERTIFICATE", r"ওয়ারিশ"),
+    # 'CERTIFI?CA?TE': some councils print 'CERTIFICTE'.
+    "frc": _rx(r"FAMILY\s*RELATIONSHIP\s*CERTIFI?CA?TE", r"FAMILY\s*CERTIFI?CA?TE", r"ওয়ারিশ"),
     "frc_issuer": _rx(r"UNION\s*PARI?S(?:H|S)?AD", r"UNION\s*PORISHAD", r"POURASHAVA", r"PAURASHAVA", r"MUNICIPALITY", r"CITY\s*CORPORATION"),
-    "challan": _rx(r"CHALLAN\s*FORM", r"চালান\s*ফরম", r"\bA-?CHALLAN\b"),
+    "challan": _rx(r"CHALLAN\s*FORM", r"চালান\s*ফরম", r"\bA-?CHALLAN\b", r"CHALLAN\s*HAS\s*BEEN\s*GENERATED"),
     "tax_ack": _rx(r"ACKNOWLEDGE?MENT\s*RECEIPT"),
     # TIN certificates also say "file the Return of Income": checked after TIN.
     "return_of_income": _rx(r"RETURN\s*OF\s*INCOME"),
@@ -152,6 +156,16 @@ def _has_transaction_table(page: PageReading) -> bool:
     return in_lines or in_table
 
 
+_LICENCE_NUMBER = re.compile(r"TRADE\s*LICEN[CS]E\s*No\.?\s*[:\-]?\s*\d+", re.IGNORECASE)
+
+
+def _only_translators_licence(text: str) -> bool:
+    """Translation agencies print their own 'Trade Licence No. 136130' on every translated
+    page (a translated NID, birth certificate, FRC ...). Such a page is a trade licence only
+    if something else on it says so, e.g. the licence's own title."""
+    return bool(TRANSLATION_RE.search(text)) and not SIG["trade"].search(_LICENCE_NUMBER.sub("", text))
+
+
 def classify_page(page: PageReading, today: date) -> PageClass:
     lines_text = "\n".join(ln.text for ln in reading_order(page.lines))
     text = "\n".join([lines_text, page.block_text, *(b.text for b in page.barcodes)])
@@ -163,6 +177,10 @@ def classify_page(page: PageReading, today: date) -> PageClass:
 
     if page.from_image_file and len(page.lines) < 5:
         return out(PageKind.PHOTO, "image file with little or no text")
+    # A photo saved as a PDF: no text, and the layout reader saw only a picture (a blank
+    # scanned page has no picture block, so it is not taken for a photo).
+    if not page.lines and page.blocks and all(b.label == "image" for b in page.blocks):
+        return out(PageKind.PHOTO, "PDF page holding only a picture")
     if mrz is not None and mrz.format == "TD3" and mrz.document_code.startswith("P"):
         return out(PageKind.PASSPORT, "passport MRZ (P<)" + (" + PASSPORT" if has["passport"] else ""))
     if has["apostille"]:
@@ -175,7 +193,7 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.NID, "ID-card MRZ (I<)")
     # A trade licence has the owner's birth-registration field; a birth certificate never
     # mentions a trade licence.
-    if has["trade"]:
+    if has["trade"] and not _only_translators_licence(text):
         return out(PageKind.TRADE_LICENSE, "Trade License")
     if has["death"]:
         return out(PageKind.DEATH_CERTIFICATE, "Death registration number / certificate")
@@ -213,6 +231,8 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.BANK_SOLVENCY, "Solvency / account holder letter from a bank")
     if has["employment"] and not has["acad_cert"]:
         return out(PageKind.EMPLOYMENT_CERTIFICATE, "employment wording")
+    if has["nid_number"]:
+        return out(PageKind.NID, "NID number, no card title or MRZ")
     if has["transcript"] and has["acad_cert"]:
         return out(PageKind.ACADEMIC_TRANSCRIPT, "academic transcript / grade sheet")
     if has["acad_cert"] and has["acad_award"] and re.search(r"CERTIF(?:Y|IED|ICATE)", text, re.IGNORECASE):

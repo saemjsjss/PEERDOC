@@ -1,7 +1,10 @@
-"""Rulebook v2.5 section 4.9: Income Tax (TAX-01 .. TAX-04). Optional documents (REQ-10).
+"""Rulebook v2.5 section 4.9: Income Tax (TAX-01, TAX-03, TAX-04). Optional documents (REQ-10).
+
+TAX-02 (total tax paid >= 10,000 BDT) was removed on 2026-11-12: the challan is judged only
+by its online verification (TAX-04).
 
 An absent Income Tax document is never a problem: TAX-01 PASSes and the per-document
-rules (TAX-02/03 per Acknowledgement, TAX-04 per Challan) simply produce nothing.
+rules (TAX-03 per Acknowledgement, TAX-04 per Challan) simply produce nothing.
 The rulebook says to ignore the QR codes on the Income Tax Certificate and
 Acknowledgement, so nothing here reads them.
 
@@ -27,10 +30,9 @@ from ..models import (
 )
 from ._evidence import ev
 
-TAX_01, TAX_02, TAX_03, TAX_04 = "TAX-01", "TAX-02", "TAX-03", "TAX-04"
-ALL_RULES = (TAX_01, TAX_02, TAX_03, TAX_04)
+TAX_01, TAX_03, TAX_04 = "TAX-01", "TAX-03", "TAX-04"
+ALL_RULES = (TAX_01, TAX_03, TAX_04)
 
-MIN_TAX_PAID = Decimal("10000")  # BDT, TAX-02
 MIN_TOTAL_INCOME = Decimal("5000000")  # BDT, TAX-03
 
 
@@ -41,7 +43,7 @@ def check_income_tax(ctx: EvaluationContext) -> list[RuleResult]:
 
     results = [_tax_01_presence(challans, acks, certs)]
     for ack in acks:
-        results += [_tax_02_tax_limit(ack, ctx), _tax_03_wealth_limit(ack, ctx)]
+        results.append(_tax_03_wealth_limit(ack, ctx))
     for challan in challans:
         results.append(_tax_04_challan(challan, ctx))
     return results
@@ -77,7 +79,7 @@ def _tax_01_presence(
     )
 
 
-# --- TAX-02 / TAX-03 minimum amounts on the Acknowledgement ---------------------------
+# --- TAX-03 minimum amount on the Acknowledgement -------------------------------------
 
 
 def _minimum_rule(
@@ -106,12 +108,6 @@ def _minimum_rule(
     if value.value >= minimum:
         return result(Outcome.PASS, f"{where}: {label} {_bdt(value.value)}, at least {_bdt(minimum)}")
     return result(Outcome.FLAG, f"{where}: {label} {_bdt(value.value)} is below {_bdt(minimum)}")
-
-
-def _tax_02_tax_limit(ack: IncomeTaxAcknowledgement, ctx: EvaluationContext) -> RuleResult:
-    return _minimum_rule(
-        TAX_02, ack.doc_id, "total_tax_paid", "total tax paid", ack.total_tax_paid, MIN_TAX_PAID, ctx
-    )
 
 
 def _tax_03_wealth_limit(ack: IncomeTaxAcknowledgement, ctx: EvaluationContext) -> RuleResult:
@@ -145,8 +141,12 @@ def _tax_04_challan(challan: IncomeTaxChallan, ctx: EvaluationContext) -> RuleRe
         detail = online.detail or "no detail given"
         return result(Outcome.FLAG, f"{label}: internet check failed: {detail}")
     if online.status is OnlineStatus.NOT_FOUND:
+        # A misread challan number also lands here, so a person checks it (FAIL is only for
+        # an amount the website contradicts).
         detail = f" ({online.detail})" if online.detail else ""
-        return result(Outcome.FAIL, f"{label}: the challan site has no such challan{detail}")
+        if "refund" in (online.detail or ""):  # the challan exists but was refunded: not valid
+            return result(Outcome.FAIL, f"{label}: the challan is not valid{detail}")
+        return result(Outcome.FLAG, f"{label}: the challan site has no such challan{detail}; check the number by hand")
 
     # VERIFIED: compare the website amount with the printed amount.
     evidence += (

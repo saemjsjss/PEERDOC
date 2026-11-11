@@ -1,9 +1,11 @@
-import { useId, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 
 import {
   ACCEPT_ATTRIBUTE,
+  fileKey,
   formatBytes,
   kindLabel,
+  MAX_FILES,
   MAX_UPLOAD_BYTES,
   mergeFiles,
   totalBytes,
@@ -30,11 +32,17 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
   const [dragging, setDragging] = useState(false)
   const [showOptions, setShowOptions] = useState(Boolean(caseId || evaluationDate || !online))
   const input = useRef<HTMLInputElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
   const dragDepth = useRef(0)
   const ids = { case: useId(), date: useId(), online: useId(), hint: useId() }
 
   const size = totalBytes(files)
   const tooBig = size > MAX_UPLOAD_BYTES
+  const tooMany = files.length > MAX_FILES
+  const blocked = tooBig || tooMany
+
+  // Coming back from another screen, start screen readers and keyboards at the top.
+  useEffect(() => heading.current?.focus(), [])
 
   function add(list: FileList | null) {
     if (!list?.length) return
@@ -58,14 +66,14 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
   }
 
   function submit() {
-    if (!files.length || tooBig) return
-    onSubmit(files, { caseId, evaluationDate: evaluationDate || undefined, online })
+    if (!files.length || blocked) return
+    onSubmit(files, evaluationDate ? { caseId, evaluationDate, online } : { caseId, online })
   }
 
   return (
     <section className="mx-auto w-full max-w-3xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Check a student's documents</h1>
+        <h1 ref={heading} tabIndex={-1} className="text-2xl font-semibold tracking-tight focus:outline-none">Check a student's documents</h1>
         <p className="mt-1 text-muted">
           Upload the case as one ZIP file, or select the PDFs and images. Every page is read and
           checked against Rulebook v2.5.
@@ -143,7 +151,7 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
           </div>
           <ul className="max-h-72 divide-y divide-line overflow-y-auto">
             {files.map((file, i) => (
-              <li key={`${file.name}-${i}`} className="flex items-center gap-3 px-5 py-2.5">
+              <li key={fileKey(file)} className="flex items-center gap-3 px-5 py-2.5">
                 <span className="w-12 shrink-0 rounded bg-surface py-0.5 text-center text-xs font-semibold text-muted">
                   {kindLabel(file.name)}
                 </span>
@@ -174,7 +182,7 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
           onClick={() => setShowOptions((v) => !v)}
           className="text-sm font-medium text-muted hover:text-ink"
         >
-          {showOptions ? '▾' : '▸'} Options
+          <span aria-hidden>{showOptions ? '▾' : '▸'}</span> Options
         </button>
         {showOptions && (
           <div className="mt-3 grid gap-4 rounded-2xl border border-line bg-white p-5 sm:grid-cols-2">
@@ -220,13 +228,17 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
         )}
       </div>
 
-      {(error || tooBig) && (
+      {(error || blocked) && (
         <div role="alert" className="mt-4 rounded-lg bg-fail-soft px-4 py-3 text-sm text-fail">
-          {tooBig ? 'The files are larger than 150 MB together. Remove some, or upload them in parts.' : error}
+          {tooBig
+            ? 'The files are larger than 150 MB together. Remove some, or upload them in parts.'
+            : tooMany
+              ? `That is more than ${MAX_FILES} files; one case can have at most ${MAX_FILES}. Remove some.`
+              : error}
           {ignored.length > 0 && (
             <ul className="mt-2 list-disc pl-5">
-              {ignored.map((i) => (
-                <li key={i.name}>
+              {ignored.map((i, index) => (
+                <li key={`${i.name}-${index}`}>
                   {i.name}: {i.reason}
                 </li>
               ))}
@@ -240,7 +252,7 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
         <button
           type="button"
           onClick={submit}
-          disabled={!files.length || tooBig}
+          disabled={!files.length || blocked}
           className="rounded-xl bg-brand px-6 py-3 font-semibold text-white shadow-sm transition hover:bg-brand/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
         >
           Verify documents

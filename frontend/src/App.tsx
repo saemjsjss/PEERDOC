@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { ApiError, deleteJob, submitJob, type FileReport, type SubmitOptions } from './api'
+import { API_HEADERS, ApiError, deleteJob, submitJob, type FileReport, type SubmitOptions } from './api'
 import { ProgressScreen } from './components/ProgressScreen'
 import { UploadScreen } from './components/UploadScreen'
 import { EMPTY_DRAFT, type Draft } from './lib/draft'
@@ -36,7 +36,7 @@ function useServerStatus() {
     let timer: ReturnType<typeof setTimeout>
     const check = async () => {
       try {
-        const r = await fetch('/health', { cache: 'no-store' })
+        const r = await fetch('/health', { cache: 'no-store', headers: API_HEADERS })
         const body = (await r.json()) as { models_loaded?: boolean }
         if (!cancelled) setStatus(r.ok && body.models_loaded ? 'ready' : 'loading')
       } catch {
@@ -75,7 +75,7 @@ export default function App() {
     remember(JOB_KEY, null)
     remember(STARTED_KEY, null)
   }, [])
-  const { job, reconnecting } = useJobPolling(jobId, reset)
+  const { job, reconnecting, stalled, keepWaiting } = useJobPolling(jobId, reset)
 
   async function start(files: File[], options: SubmitOptions) {
     setError(null)
@@ -122,9 +122,10 @@ export default function App() {
     }
   }
 
-  async function newCase() {
-    // Forget the verdict on the server too: it holds the student's personal data.
-    if (jobId) await deleteJob(jobId).catch(() => undefined)
+  function newCase() {
+    // Forget the verdict on the server too: it holds the student's personal data. The UI
+    // doesn't wait for that; a slow or stopped server just lets the delete time out.
+    if (jobId) deleteJob(jobId, AbortSignal.timeout(5000)).catch(() => undefined)
     setDraft(EMPTY_DRAFT)
     reset()
   }
@@ -141,7 +142,8 @@ export default function App() {
     }
   }, [])
 
-  const failed = job?.status === 'failed'
+  // A finished job without a verdict can't be shown; treat it as failed.
+  const failed = job?.status === 'failed' || (job?.status === 'done' && !job.result)
   useEffect(() => {
     if (failed) failedHeading.current?.focus()
   }, [failed])
@@ -149,13 +151,13 @@ export default function App() {
   let screen
   if (job?.status === 'done' && job.result) {
     screen = <ResultsScreen verdict={job.result} onNewCase={newCase} />
-  } else if (job?.status === 'failed') {
+  } else if (job && failed) {
     screen = (
       <section className="mx-auto w-full max-w-2xl rounded-2xl border border-fail/30 bg-fail-soft p-8">
         <h1 ref={failedHeading} tabIndex={-1} className="text-xl font-semibold text-fail focus:outline-none">
           The check could not be completed
         </h1>
-        <p className="mt-2 text-ink">{job.error ?? 'Unknown error.'} The uploaded files have been deleted from the server.</p>
+        <p className="mt-2 text-ink">{job.error ?? (job.status === 'done' ? 'The server finished without a verdict.' : 'Unknown error.')} The uploaded files have been deleted from the server.</p>
         <button type="button" onClick={newCase} className="mt-6 rounded-xl bg-brand px-5 py-2.5 font-semibold text-white hover:bg-brand/90">
           Start again
         </button>
@@ -171,6 +173,9 @@ export default function App() {
         onCancel={cancel}
         cancelling={cancelling}
         cancelError={cancelError}
+        stalled={stalled}
+        onKeepWaiting={keepWaiting}
+        onStartAgain={newCase}
       />
     )
   } else {

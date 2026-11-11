@@ -81,7 +81,7 @@ def test_no_tax_documents_passes_tax_01_only():
 
 def test_all_documents_valid_pass_every_rule():
     rs = run(challan(), acknowledgement(), certificate())
-    assert set(rs) == {"TAX-01", "TAX-02", "TAX-03", "TAX-04"}
+    assert set(rs) == {"TAX-01", "TAX-03", "TAX-04"}
     assert {r.outcome for r in rs.values()} == {Outcome.PASS}
     reason = rs["TAX-01"].reason
     assert "Challan challan" in reason and "Acknowledgement ack" in reason and "Certificate tax-cert" in reason
@@ -95,12 +95,12 @@ def test_certificate_only_passes_presence_and_nothing_else():
     assert "Challan" not in rs["TAX-01"].reason
 
 
-def test_no_acknowledgement_means_no_tax_02_or_03():
+def test_no_acknowledgement_means_no_tax_03():
     assert set(run(challan())) == {"TAX-01", "TAX-04"}
 
 
 def test_no_challan_means_no_tax_04():
-    assert set(run(acknowledgement())) == {"TAX-01", "TAX-02", "TAX-03"}
+    assert set(run(acknowledgement())) == {"TAX-01", "TAX-03"}
 
 
 def test_one_tax_01_and_per_document_results_for_multiple_documents():
@@ -109,39 +109,12 @@ def test_one_tax_01_and_per_document_results_for_multiple_documents():
     )
     ids = [r.rule_id for r in results]
     assert ids.count("TAX-01") == 1
-    assert ids.count("TAX-02") == 2 and ids.count("TAX-03") == 2 and ids.count("TAX-04") == 1
+    assert ids.count("TAX-03") == 2 and ids.count("TAX-04") == 1
 
 
-# --- TAX-02 Tax limit ---------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("tax_paid", "outcome"),
-    [("10000", Outcome.PASS), ("10000.00", Outcome.PASS), ("9999.99", Outcome.FLAG), ("0", Outcome.FLAG)],
-)
-def test_tax_02_boundary(tax_paid, outcome):
-    r = run(acknowledgement(tax_paid=tax_paid))["TAX-02"]
-    assert r.outcome is outcome
-    assert "ack" in r.reason
-    assert r.evidence[0].field == "total_tax_paid"
-    assert r.evidence[0].value == tax_paid
-
-
-def test_tax_02_below_limit_reason():
-    r = run(acknowledgement(tax_paid="8000"))["TAX-02"]
-    assert r.reason == "Income Tax Acknowledgement ack: total tax paid 8,000 BDT is below 10,000 BDT"
-
-
-def test_tax_02_missing_flags():
-    r = run(acknowledgement(tax_paid=None))["TAX-02"]
-    assert r.outcome is Outcome.FLAG
-    assert "not found" in r.reason
-
-
-def test_tax_02_low_confidence_flags_even_when_above_limit():
-    r = run(acknowledgement(tax_paid="90000", confidence=LOW))["TAX-02"]
-    assert r.outcome is Outcome.FLAG
-    assert "low OCR confidence" in r.reason
+def test_tax_paid_below_10000_is_no_longer_checked():
+    # TAX-02 removed 2026-11-12: the challan is judged by its online verification only.
+    assert "TAX-02" not in run(acknowledgement(tax_paid="0"))
 
 
 # --- TAX-03 Wealth limit -----------------------------------------------------------
@@ -197,9 +170,10 @@ def test_tax_04_amount_mismatch_fails():
     assert "1,500 BDT does not match printed amount 15,000 BDT" in r.reason
 
 
-def test_tax_04_not_found_online_fails():
+def test_tax_04_not_found_online_flags():
+    # A misread challan number also comes back NOT_FOUND: a person checks it.
     r = run(challan(online=OnlineCheck(status=OnlineStatus.NOT_FOUND)))["TAX-04"]
-    assert r.outcome is Outcome.FAIL
+    assert r.outcome is Outcome.FLAG
     assert "the challan site has no such challan" in r.reason
 
 
@@ -246,3 +220,8 @@ def test_tax_04_verified_but_website_amount_missing_flags():
     r = run(challan(online=OnlineCheck(status=OnlineStatus.VERIFIED)))["TAX-04"]
     assert r.outcome is Outcome.FLAG
     assert "website showed no amount" in r.reason
+
+
+def test_tax_04_refunded_challan_fails():
+    online = OnlineCheck(status=OnlineStatus.NOT_FOUND, detail="challan 2526-0012345678 has a refund request and is not valid for any service")
+    assert run(challan(online=online))["TAX-04"].outcome is Outcome.FAIL

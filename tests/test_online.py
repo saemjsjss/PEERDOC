@@ -309,8 +309,58 @@ def test_http_fetch_caps_size_and_survives_unknown_charset(monkeypatch):
         def open(self, request, timeout):
             return Response(self.data, self.charset)
 
-    monkeypatch.setattr(checks, "_opener", Opener("abc".encode(), "bogus-charset"))
+    monkeypatch.setattr(checks, "_opener", Opener(b"abc", "bogus-charset"))
     assert checks.http_fetch(URL) == (200, "abc")
     monkeypatch.setattr(checks, "_opener", Opener(b"x" * (checks.MAX_RESPONSE_BYTES + 70000)))
     with pytest.raises(ValueError):
         checks.http_fetch(URL)
+
+
+def test_http_fetch_deadline_bounds_a_trickling_server(monkeypatch):
+    import hklv_online.checks as checks
+
+    class Trickle:
+        status = 200
+        headers = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read1(self, n):
+            return b"x"  # one byte per read, forever
+
+        def read(self, n=-1):
+            raise AssertionError("read() waits for n bytes; read1() must be used")
+
+    clock = iter(range(0, 10_000, 5))
+    monkeypatch.setattr(checks.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(checks, "_opener", type("O", (), {"open": lambda self, request, timeout: Trickle()})())
+    with pytest.raises(TimeoutError):
+        checks.http_fetch(URL)
+
+
+def test_http_fetch_closes_error_responses(monkeypatch):
+    import io
+    import urllib.error
+
+    import hklv_online.checks as checks
+
+    body = io.BytesIO(b"error page")
+
+    class Opener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(URL, 503, "busy", {}, body)
+
+    monkeypatch.setattr(checks, "_opener", Opener())
+    assert checks.http_fetch(URL) == (503, "")
+    assert body.closed
+
+
+def test_challan_amount_with_thousands_separator_is_read():
+    # The live site sends the amount as a string with a comma (seen 2026-11-12).
+    page = challan_page({"ChallanNo": CHALLAN_NO, "Amount": "3,000.00", "IsRefundRequested": False, "ErrMessage": None})
+    check = check_challan(CHALLAN_NO, FakeWeb({CHALLAN_URL: (200, page)}))
+    assert check.status is OnlineStatus.VERIFIED and check.amount == Decimal("3000")

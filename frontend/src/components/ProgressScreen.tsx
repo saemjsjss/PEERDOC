@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Job } from '../api'
 import { formatDuration, formatEta } from '../lib/time'
@@ -23,6 +23,10 @@ interface Props {
   cancelling: boolean
   /** Why the last cancel didn't work (e.g. the pages started being read meanwhile). */
   cancelError: string | null
+  /** Polling gave up after repeated failures; why. */
+  stalled: string | null
+  onKeepWaiting: () => void
+  onStartAgain: () => void
 }
 
 function currentStep(uploadProgress: number | null, job: Job | null): Step {
@@ -34,8 +38,21 @@ function currentStep(uploadProgress: number | null, job: Job | null): Step {
   return 'waiting'
 }
 
-export function ProgressScreen({ uploadProgress, job, reconnecting, startedAt, onCancel, cancelling, cancelError }: Props) {
+export function ProgressScreen({
+  uploadProgress,
+  job,
+  reconnecting,
+  startedAt,
+  onCancel,
+  cancelling,
+  cancelError,
+  stalled,
+  onKeepWaiting,
+  onStartAgain,
+}: Props) {
   const [now, setNow] = useState(() => Date.now())
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => heading.current?.focus(), [])
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
@@ -43,6 +60,7 @@ export function ProgressScreen({ uploadProgress, job, reconnecting, startedAt, o
 
   const step = currentStep(uploadProgress, job)
   const stepIndex = STEPS.findIndex((s) => s.id === step)
+  const stepLabel = STEPS[stepIndex]?.label ?? ''
   const uploading = uploadProgress !== null
   const fraction = uploading ? uploadProgress * 0.03 : Math.max(0.03, job?.progress ?? 0)
   const percent = Math.round(fraction * 100)
@@ -76,10 +94,16 @@ export function ProgressScreen({ uploadProgress, job, reconnecting, startedAt, o
             <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeOpacity="0.15" strokeWidth="3" />
             <path d="M22 12a10 10 0 00-10-10" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
           </svg>
-          <div className="min-w-0" aria-live="polite">
-            <h1 className="text-xl font-semibold">{title}</h1>
+          <div className="min-w-0">
+            <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold focus:outline-none">
+              {title}
+            </h1>
             <p className="text-muted">{detail}</p>
           </div>
+          {/* Announce only the step, not every page read (a case runs for ~8 minutes). */}
+          <p className="sr-only" aria-live="polite">
+            Step {stepIndex + 1} of {STEPS.length}: {stepLabel}
+          </p>
         </div>
 
         <div className="mt-7">
@@ -129,6 +153,20 @@ export function ProgressScreen({ uploadProgress, job, reconnecting, startedAt, o
           <p role="alert" className="mt-6 rounded-lg bg-flag-soft px-4 py-2 text-sm text-flag">
             {cancelError}
           </p>
+        )}
+
+        {stalled && (
+          <div role="alert" className="mt-6 rounded-lg bg-fail-soft px-4 py-3 text-sm text-fail">
+            <p>{stalled}</p>
+            <div className="mt-3 flex gap-3">
+              <button type="button" onClick={onKeepWaiting} className="rounded-lg bg-brand px-3 py-1.5 font-semibold text-white hover:bg-brand/90">
+                Keep waiting
+              </button>
+              <button type="button" onClick={onStartAgain} className="rounded-lg px-3 py-1.5 font-medium text-ink hover:bg-surface">
+                Start again
+              </button>
+            </div>
+          </div>
         )}
 
         {reconnecting && job && (

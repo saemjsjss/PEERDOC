@@ -18,6 +18,7 @@ export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${LD_LIBRARY_PATH:-}"
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
 PORT="${HKLV_PORT:-8000}"
+export HKLV_PORT="$PORT"   # the server keeps its uploads in a per-port folder
 # Already running (e.g. started in another window)? Say so instead of loading the models
 # for 20 s and then failing with "address already in use".
 if curl -s -m 2 "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status":"ok"'; then

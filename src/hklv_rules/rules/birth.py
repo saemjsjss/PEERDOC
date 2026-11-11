@@ -2,8 +2,13 @@
 
   * BIRTH-01 (Format): if Bangla, must have an English translation. Missing -> FAIL.
   * BIRTH-02 (Notary): must be notarised. Missing -> FAIL.
-  * BIRTH-03 (DOB): must match the Passport DOB. Year differs -> FAIL; day/month differs -> FLAG.
+  * BIRTH-03 (DOB): must match the Passport DOB, else FAIL. A Bangla certificate with an
+    English translation is checked on the birth year only (agreed 2026-11-12).
   * BIRTH-04 (BRN): the Birth Registration Number must start with the birth year. Mismatch -> FLAG.
+  * BIRTH-05 (Name): the name must match StudentRef (the passport). Mismatch -> FAIL.
+    Birth Certificates are the student's only; a parent's certificate FAILs here.
+
+A value OCR could not read reliably is a FLAG, never a FAIL.
 
 One result per rule per Birth Certificate. With no Birth Certificate this returns nothing:
 REQ-03 already FAILs the case.
@@ -14,12 +19,14 @@ from __future__ import annotations
 from datetime import date
 
 from ..context import EvaluationContext
-from ..models import BirthCertificate, Outcome, Passport, RuleResult
+from ..identity import MatchKind, compare_name
+from ..models import BirthCertificate, Outcome, Passport, Person, RuleResult
 from ._evidence import ev
-from ._shared import digits, notary_rule, translation_rule
+from ..names import normalize_name
+from ._shared import digits, edit_distance, notary_rule, translation_rule
 
-BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04 = "BIRTH-01", "BIRTH-02", "BIRTH-03", "BIRTH-04"
-ALL_RULES = (BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04)
+BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04, BIRTH_05 = "BIRTH-01", "BIRTH-02", "BIRTH-03", "BIRTH-04", "BIRTH-05"
+ALL_RULES = (BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04, BIRTH_05)
 
 
 def check_birth_certificates(ctx: EvaluationContext) -> list[RuleResult]:
@@ -32,6 +39,7 @@ def check_birth_certificates(ctx: EvaluationContext) -> list[RuleResult]:
             _birth_02_notary(cert, ctx),
             _birth_03_dob(cert, passports, ctx),
             _birth_04_brn(cert, passports, ctx),
+            _birth_05_name(cert, ctx),
         ]
     return results
 
@@ -95,7 +103,8 @@ def _birth_03_dob(cert: BirthCertificate, passports: list[Passport], ctx: Evalua
 
     if not birth_dob.found:
         return result(Outcome.FLAG, "no date of birth found, so it can't be compared with the Passport")
-    if not birth_dob.is_reliable(ctx.threshold):
+    shaky_read = not birth_dob.is_reliable(ctx.threshold)
+    if shaky_read and not passport_dobs:
         return result(Outcome.FLAG, "date of birth read with low OCR confidence")
     if not passport_dobs:
         return result(Outcome.FLAG, f"date of birth can't be compared: {_no_passport_dob_reason(passports, shaky)}")
@@ -107,11 +116,22 @@ def _birth_03_dob(cert: BirthCertificate, passports: list[Passport], ctx: Evalua
     theirs = distinct.pop()
     passport_ids = ", ".join(doc_id for doc_id, _ in passport_dobs)
     detail = f"date of birth {mine:%d-%m-%Y} vs Passport {passport_ids} {theirs:%d-%m-%Y}"
+    year_only = ctx.tri_state(cert.has_english_translation) is True
+    if shaky_read:
+        # A misread can't land exactly on the passport's date, so agreement is a PASS;
+        # disagreement may be the misread, so it stays a FLAG.
+        agrees = mine.year == theirs.year if year_only else mine == theirs
+        if agrees:
+            return result(Outcome.PASS, f"date of birth read with low OCR confidence but agrees with the Passport: {detail}")
+        return result(Outcome.FLAG, f"date of birth read with low OCR confidence and differs from the Passport: {detail}")
     if mine == theirs:
         return result(Outcome.PASS, f"date of birth {mine:%d-%m-%Y} matches Passport {passport_ids}")
     if mine.year != theirs.year:
         return result(Outcome.FAIL, f"birth year differs: {detail}")
-    return result(Outcome.FLAG, f"same year but day/month differs: {detail}")
+    if year_only:
+        # Translated Bangla certificates are checked on the year only.
+        return result(Outcome.PASS, f"birth year {mine.year} matches (translated certificate: year only): {detail}")
+    return result(Outcome.FAIL, f"day/month differs: {detail}")
 
 
 # --- BIRTH-04 BRN ------------------------------------------------------------------------
@@ -163,3 +183,40 @@ def _birth_04_brn(cert: BirthCertificate, passports: list[Passport], ctx: Evalua
         f"BRN {number} ({len(number)} digits) does not start with birth year {year} (from {source}); "
         "older 13/16-digit BRN formats or a misread number need manual review",
     )
+
+
+# --- BIRTH-05 Name -----------------------------------------------------------------------
+
+_NAME_OUTCOME = {
+    MatchKind.EXACT: Outcome.PASS,
+    MatchKind.AFFIDAVIT: Outcome.PASS,
+    MatchKind.UNCERTAIN: Outcome.FLAG,
+    MatchKind.MISMATCH: Outcome.FAIL,
+}
+
+
+def _birth_05_name(cert: BirthCertificate, ctx: EvaluationContext) -> RuleResult:
+    evidence = (ev(cert.doc_id, "name", cert.name),)
+    if ctx.anchors.student.name is None:
+        outcome, reason = Outcome.FLAG, f"name can't be checked: {ctx.anchors.student.describe()}"
+    else:
+        cmp = compare_name(cert.name, Person.STUDENT, ctx)
+        outcome, reason = _NAME_OUTCOME[cmp.kind], f"name {cmp.reason}"
+        if cmp.kind is MatchKind.MISMATCH and _near_miss(cert.name.value, ctx.anchors.student.name):
+            outcome, reason = Outcome.FLAG, f"{reason}; only a letter or two apart, which may be an OCR misread"
+    return RuleResult(rule_id=BIRTH_05, outcome=outcome, reason=f"{_label(cert)}: {reason}", evidence=evidence)
+
+
+def _short_key(name: str) -> str:
+    # 'MDKAMAL' (OCR lost the space) vs 'MOHAMMAD KAMAL': compare the titles short.
+    key = normalize_name(name)
+    for title, short in (("MOHAMMAD", "MD"), ("MOSAMMAT", "MST")):
+        if key.startswith(title):
+            key = short + key[len(title):]
+    return key
+
+
+def _near_miss(observed: str, reference: str) -> bool:
+    """Up to two letters apart: an OCR slip on old or low-resolution certificates, so a
+    person looks at it instead of the case FAILing. Further apart is a real mismatch."""
+    return edit_distance(_short_key(observed), _short_key(reference)) <= 2

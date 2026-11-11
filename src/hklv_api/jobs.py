@@ -19,8 +19,8 @@ import secrets
 import shutil
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
-from enum import Enum
+from datetime import UTC, date, datetime
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -39,14 +39,14 @@ CHECKING_SECONDS = 10.0  # online checks + rules after OCR
 SWEEP_EVERY_SECONDS = 2.0  # a scan of a few in-memory jobs: cheap
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
 
 
-class Stage(str, Enum):
+class Stage(StrEnum):
     WAITING = "waiting"  # in the queue behind other jobs
     READING = "reading"  # OCR, page by page
     CHECKING = "checking"  # online checks and rules
@@ -78,10 +78,17 @@ class Job:
     finished: float | None = None
     result: VerifyResponse | None = None
     error: str | None = None
+    cancelled: bool = False  # set by DELETE; a running job stops after the current page
+    ended: asyncio.Event = field(default_factory=asyncio.Event)  # set when the run is over
+
+
+class JobCancelled(Exception):
+    """Raised from the progress callback to stop a job that DELETE cancelled."""
 
 
 class JobView(BaseModel):
     job_id: str
+    server_id: str = Field(description="Changes when the server restarts (a restart forgets every job)")
     status: JobStatus
     stage: Stage
     message: str
@@ -100,7 +107,7 @@ class JobView(BaseModel):
 
 
 def _when(ts: float | None) -> datetime | None:
-    return None if ts is None else datetime.fromtimestamp(ts, tz=timezone.utc)
+    return None if ts is None else datetime.fromtimestamp(ts, tz=UTC)
 
 
 class QueueFull(Exception):
@@ -114,8 +121,10 @@ class JobManager:
         self.worker: asyncio.Task | None = None
         self.janitor: asyncio.Task | None = None
         self.seconds_per_page: float | None = None  # learned from finished jobs
-        # One case reads at a time, whether it came through the queue or POST /verify.
+        # One case reads at a time (POST /jobs and POST /verify both go through the queue).
         self.case_lock = asyncio.Lock()
+        # Random per start: lets a client tell "the server restarted" from "the verdict expired".
+        self.server_id = secrets.token_urlsafe(8)
 
     # -- lifecycle ------------------------------------------------------------------------
 
@@ -160,17 +169,15 @@ class JobManager:
         self.forget_expired()
         return self.jobs.get(job_id)
 
-    def delete(self, job_id: str) -> bool:
-        """Cancel a queued job or forget a finished one. A running job can't be stopped
-        mid-OCR; returns False for it."""
-        job = self.jobs.get(job_id)
+    def delete(self, job_id: str) -> None:
+        """Cancel a queued or running job, or forget a finished one. A running job stops
+        after the page being read (its files are deleted when it stops)."""
+        job = self.jobs.pop(job_id, None)
         if job is None:
-            return True
-        if job.status is JobStatus.RUNNING:
-            return False
-        shutil.rmtree(job.folder, ignore_errors=True)
-        del self.jobs[job_id]  # a queued id still in the queue is skipped by the worker
-        return True
+            return
+        job.cancelled = True  # a queued id still in the queue is skipped by the worker
+        if job.status is not JobStatus.RUNNING:
+            shutil.rmtree(job.folder, ignore_errors=True)
 
     def forget_expired(self) -> None:
         now = time.time()
@@ -187,6 +194,7 @@ class JobManager:
     def view(self, job: Job) -> JobView:
         return JobView(
             job_id=job.id,
+            server_id=self.server_id,
             status=job.status,
             stage=job.stage,
             message=STAGE_MESSAGES[job.stage],
@@ -251,16 +259,22 @@ class JobManager:
             await self._run(job, app)
 
     async def _run(self, job: Job, app) -> None:
-        job.status, job.stage, job.started = JobStatus.RUNNING, Stage.READING, time.time()
-
         def page_done(_stat) -> None:
+            if job.cancelled:
+                raise JobCancelled()
             job.pages_done += 1
 
         def reading_done(_reading) -> None:
+            if job.cancelled:
+                raise JobCancelled()
             job.stage = Stage.CHECKING
 
         try:
             async with self.case_lock:
+                if job.cancelled:
+                    return
+                # Only now is the job really running: it holds the reader.
+                job.status, job.stage, job.started = JobStatus.RUNNING, Stage.READING, time.time()
                 result = await run_case(
                     job.folder,
                     case_id=job.case_id,
@@ -277,9 +291,13 @@ class JobManager:
             if ocr and job.pages_done:
                 pace = ocr / job.pages_done
                 self.seconds_per_page = pace if self.seconds_per_page is None else 0.7 * self.seconds_per_page + 0.3 * pace
+        except JobCancelled:
+            log.info("job cancelled while running")
+            job.status, job.error = JobStatus.FAILED, "cancelled"
         except Exception as e:  # noqa: BLE001  (log the type only: messages could quote document content)
             log.error("job failed: %s", type(e).__name__)
             job.status, job.error = JobStatus.FAILED, f"verification failed ({type(e).__name__})"
         finally:
             job.stage, job.finished = Stage.FINISHED, time.time()
             shutil.rmtree(job.folder, ignore_errors=True)
+            job.ended.set()

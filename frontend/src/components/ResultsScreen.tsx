@@ -265,8 +265,8 @@ function CaseDetails({ verdict, printing }: { verdict: Verdict; printing: boolea
           <div>
             <h3 className="font-medium">Ignored files</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              {files.ignored.map((f) => (
-                <li key={f.name} className="break-all">
+              {files.ignored.map((f, index) => (
+                <li key={`${f.name}-${index}`} className="break-all">
                   {f.name} <span className="break-normal text-muted">({f.reason})</span>
                 </li>
               ))}

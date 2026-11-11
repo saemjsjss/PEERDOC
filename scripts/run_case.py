@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     except (_UsageError, FileNotFoundError, NotADirectoryError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return EXIT_ERROR
-    except Exception as e:  # a crash must never look like a verdict (exit 1 = FLAG)
+    except Exception as e:  # noqa: BLE001  (a crash must never look like a verdict: exit 1 = FLAG)
         print(f"Error: the pipeline crashed: {_describe(e)}", file=sys.stderr)
         return EXIT_ERROR
 

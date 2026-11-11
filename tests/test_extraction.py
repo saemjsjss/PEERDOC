@@ -833,6 +833,12 @@ def test_date_of_birth_in_words_is_used_when_the_boxes_are_unreadable():
         ("08 05 20066", None),
         ("31 02 2006", None),
         ("08/05/2006", None),  # not boxed: parse_date's job
+        # old BDR Form-3: a filled square between month and year
+        ("25 | 02 | ■ | 2002", date(2002, 2, 25)),
+        ("25 02 ■ 2002", date(2002, 2, 25)),
+        ("25 02 I 2002", date(2002, 2, 25)),
+        ("25 02 1 2002", date(2002, 2, 25)),  # the square read as a digit
+        ("25 02 12 2002", None),  # two stray digits: not guessed
     ],
 )
 def test_parse_boxed_date(text, expected):

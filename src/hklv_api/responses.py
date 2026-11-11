@@ -27,7 +27,7 @@ class FileReport(BaseModel):
     ignored_more: int = Field(0, description="Further ignored files not listed by name")
 
     @classmethod
-    def of(cls, saved: SavedFiles) -> "FileReport":
+    def of(cls, saved: SavedFiles) -> FileReport:
         return cls(accepted=list(saved.accepted), ignored=list(saved.ignored), ignored_more=saved.ignored_more)
 
 

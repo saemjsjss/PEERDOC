@@ -86,7 +86,7 @@ def _parent_identity(rule_id: str, parent: Person, nids: Assignment, deaths: Ass
             rule_id=rule_id,
             outcome=Outcome.FLAG,
             reason=f"No {who} NID or Death Certificate confirmed; could not assign {', '.join(unresolved)}, "
-            f"which may be the {who.lower()}'s",
+            f"which may be the {who.lower()}'s" + (" (NID-ASSIGN says why)" if nids.possible_for(parent) else ""),
         )
     return RuleResult(
         rule_id=rule_id, outcome=Outcome.FAIL, reason=f"No {who} NID and no {who} Death Certificate"

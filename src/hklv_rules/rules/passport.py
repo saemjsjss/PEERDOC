@@ -17,13 +17,11 @@ No passport at all -> one FAIL (REQ-01 also fails).
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from datetime import date
 
 from ..context import EvaluationContext
 from ..models import Extracted, Outcome, Passport, RuleResult, worst
-from ..names import normalize_name
+from ..names import same_name
 from ._evidence import ev
 from ._shared import add_months
 
@@ -128,7 +126,7 @@ def _names(p: Passport, ctx: EvaluationContext) -> tuple[Outcome, str]:
     if problems:
         return Outcome.FLAG, f"{' and '.join(problems)}, so printed and MRZ names can't be confirmed to match"
     printed_name, mrz_name = printed[0], mrz[0]
-    if _same_name(printed_name, mrz_name):
+    if same_name(printed_name, mrz_name):
         return Outcome.PASS, f"printed name '{printed_name}' matches MRZ name '{mrz_name}'"
     return Outcome.FLAG, f"printed name '{printed_name}' does not match MRZ name '{mrz_name}'"
 
@@ -144,15 +142,3 @@ def _joined(label: str, parts: tuple[Extracted[str], ...], ctx: EvaluationContex
     return " ".join(x.value.strip() for x in found), None
 
 
-def _words(raw: str) -> list[str]:
-    # MRZ fillers ('<') and punctuation separate words just like spaces.
-    text = unicodedata.normalize("NFKC", raw).upper()
-    return sorted(w for w in (normalize_name(t) for t in re.findall(r"[^\W\d_]+", text)) if w)
-
-
-def _same_name(a: str, b: str) -> bool:
-    key_a, key_b = normalize_name(a), normalize_name(b)
-    if key_a and key_a == key_b:
-        return True
-    words_a = _words(a)
-    return bool(words_a) and words_a == _words(b)

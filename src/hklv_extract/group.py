@@ -62,7 +62,7 @@ class PageGroup:
 def group_pages(pages: Sequence[PageReading], classes: Sequence[PageClass]) -> list[PageGroup]:
     groups: list[PageGroup] = []
     current: PageGroup | None = None
-    for page, cls in zip(pages, classes):
+    for page, cls in zip(pages, classes, strict=True):
         if cls.kind == PageKind.IGNORED:
             current = None
             continue

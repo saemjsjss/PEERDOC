@@ -20,6 +20,7 @@ content, never by name.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import shutil
 import unicodedata
@@ -166,9 +167,8 @@ def extract_zip(zip_path: Path, folder: Path, saved: SavedFiles, label: str) -> 
 
 
 async def save_uploads(files, folder: Path) -> SavedFiles:
-    """Write every upload (FastAPI UploadFile) into `folder`; unpack ZIPs; enforce limits."""
-    import asyncio
-
+    """Write every upload (FastAPI UploadFile) into `folder`; unpack ZIPs; enforce limits.
+    Disk writes run in worker threads, so a big upload doesn't stall other requests."""
     saved = SavedFiles()
     uploaded = 0
     staging = folder / ".incoming"
@@ -178,21 +178,21 @@ async def save_uploads(files, folder: Path) -> SavedFiles:
             label = safe_name(upload.filename)
             tmp = _unique(staging, label)
             head = b""
-            with open(tmp, "wb") as out:
+            with await asyncio.to_thread(open, tmp, "wb") as out:
                 while chunk := await upload.read(CHUNK):
                     if not head:
                         head = chunk[:4]
                     uploaded += len(chunk)
                     if uploaded > MAX_UPLOAD_BYTES:
                         raise UploadError(413, f"upload is too large (limit {MAX_UPLOAD_BYTES // 2**20} MB)")
-                    out.write(chunk)
+                    await asyncio.to_thread(out.write, chunk)
             if head == ZIP_MAGIC or label.lower().endswith(".zip"):
                 await asyncio.to_thread(extract_zip, tmp, folder, saved, label)
             elif supported(label):
                 _Budget(saved).count_file()
                 _Budget(saved).add(tmp.stat().st_size)
                 target = _unique(folder, label)
-                shutil.move(str(tmp), target)
+                await asyncio.to_thread(shutil.move, str(tmp), target)
                 saved.accepted.append(target.name)
             else:
                 saved.ignore(label, "not a PDF, image or ZIP")

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from .models import BirthCertificate, CaseFile, Extracted, Passport, Person
 from .models.common import Frozen
-from .names import normalize_name
+from .names import normalize_name, same_name
 
 
 class Anchor(Frozen):
@@ -80,7 +80,7 @@ def _student_anchor(passports: list[Passport], threshold: float) -> Anchor:
             problems.append("MRZ name not found")
         elif not mrz_ok:
             problems.append("MRZ name has low OCR confidence")
-        elif normalize_name(mrz) != normalize_name(printed):
+        elif not same_name(mrz, printed):
             problems.append(f"MRZ name '{mrz}' differs from printed name '{printed}'")
         candidates.append(
             Anchor(

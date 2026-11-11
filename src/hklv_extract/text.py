@@ -90,7 +90,8 @@ def find_labeled(
     lines = reading_order(page.lines)
     label_re = re.compile(r"(?:^|\b)(?:" + "|".join(labels) + r")\s*[:：\-]?\s*", re.IGNORECASE)
     value_re = re.compile(r"^(" + value_pattern + r")", re.IGNORECASE)
-    stop_re = re.compile(r"\s+(?:" + "|".join(stop_words) + r")\b.*$", re.IGNORECASE) if stop_words else None
+    # Also at the start: a value that is itself the next field's label ('Gender') is no value.
+    stop_re = re.compile(r"(?:^|\s+)(?:" + "|".join(stop_words) + r")\b.*$", re.IGNORECASE) if stop_words else None
 
     def take(text: str) -> str | None:
         if stop_re:
@@ -122,8 +123,12 @@ def find_labeled(
             v = take("".join(texts) if boxed else " ".join(texts))
             if v:
                 return Found(v, min(o.score for o in [ln, *row]), page.page_no)
-        # Value on the next line (same column or right of the label).
-        for nxt in lines[i + 1 : i + 3]:
+        # Value on the next line (same column or right of the label). If the label's own row
+        # filled that window with stamp or hologram glyphs ('6', '合', 'è'), the rows below.
+        window = lines[i + 1 : i + 3]
+        junk = all(same_row(ln, o) and not re.search(r"[A-Za-z]{2}|\d{3}", o.text) for o in window)
+        below = [o for o in lines[i + 1 :] if not same_row(ln, o)][:2] if window and junk else []
+        for nxt in [*window, *below]:
             if label_re.search(nxt.text):
                 break
             v = take(nxt.text)

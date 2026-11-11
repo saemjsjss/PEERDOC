@@ -1,9 +1,10 @@
-"""Birth Certificate rules (BIRTH-01..04). All data fictional."""
+"""Birth Certificate rules (BIRTH-01..05). All data fictional."""
 
 from datetime import date
 
 from builders import (
     LOW,
+    STUDENT,
     STUDENT_BRN,
     STUDENT_DOB,
     birth_certificate,
@@ -49,7 +50,7 @@ def test_no_birth_certificate_returns_nothing():
 
 def test_one_result_per_rule_per_certificate():
     results = run(passport(), birth_certificate(doc_id="b1"), birth_certificate(doc_id="b2"))
-    assert len(results) == 8
+    assert len(results) == 2 * len(ALL_RULES)
     for doc_id in ("b1", "b2"):
         mine = [r for r in results if f"Birth Certificate {doc_id}:" in r.reason]
         assert sorted(r.rule_id for r in mine) == sorted(ALL_RULES)
@@ -116,20 +117,22 @@ def test_year_differs_by_one_day_across_new_year_fails():
     assert r.outcome is Outcome.FAIL
 
 
-def test_day_differs_flags():
+def test_day_differs_fails():
     r = default_rules(dob=date(2001, 3, 16))["BIRTH-03"]
-    assert r.outcome is Outcome.FLAG
+    assert r.outcome is Outcome.FAIL
     assert "day/month" in r.reason
 
 
-def test_month_differs_flags():
-    assert default_rules(dob=date(2001, 4, 15))["BIRTH-03"].outcome is Outcome.FLAG
+def test_month_differs_fails():
+    assert default_rules(dob=date(2001, 4, 15))["BIRTH-03"].outcome is Outcome.FAIL
 
 
-def test_day_and_month_swapped_flags():
-    # 05-03 vs 03-05: typical day/month swap; same year -> FLAG, not FAIL.
-    r = rules(passport(dob=date(2001, 3, 5)), birth_certificate(dob=date(2001, 5, 3)))["BIRTH-03"]
-    assert r.outcome is Outcome.FLAG
+def test_translated_bangla_certificate_checks_the_year_only():
+    r = default_rules(dob=date(2001, 4, 15), language=Language.BANGLA, translated=True)["BIRTH-03"]
+    assert r.outcome is Outcome.PASS
+    assert "year only" in r.reason
+    wrong_year = default_rules(dob=date(2002, 3, 15), language=Language.BANGLA, translated=True)["BIRTH-03"]
+    assert wrong_year.outcome is Outcome.FAIL
 
 
 def test_birth_dob_missing_flags():
@@ -138,10 +141,16 @@ def test_birth_dob_missing_flags():
     assert "no date of birth" in r.reason
 
 
-def test_birth_dob_low_confidence_flags_even_if_equal():
+def test_birth_dob_low_confidence_passes_when_it_agrees_exactly():
+    # e.g. an old boxed date of birth: a misread can't land exactly on the passport's date.
     r = default_rules(field_confidence=LOW)["BIRTH-03"]
-    assert r.outcome is Outcome.FLAG
+    assert r.outcome is Outcome.PASS
     assert "low OCR confidence" in r.reason
+
+
+def test_birth_dob_low_confidence_that_differs_flags_not_fails():
+    r = default_rules(field_confidence=LOW, dob=date(2001, 3, 16))["BIRTH-03"]
+    assert r.outcome is Outcome.FLAG
 
 
 def test_no_passport_flags():
@@ -261,3 +270,33 @@ def test_brn_fallback_passports_same_year_different_day_still_usable():
 
 def test_dob_default_constants_consistent():
     assert STUDENT_BRN.startswith(str(STUDENT_DOB.year))
+
+
+# --- BIRTH-05 Name ---------------------------------------------------------------------------
+
+
+def test_name_matching_passport_passes():
+    assert default_rules()["BIRTH-05"].outcome is Outcome.PASS
+
+
+def test_someone_elses_birth_certificate_fails():
+    # A parent's certificate: Birth Certificates are the student's only.
+    r = default_rules(name="ABDUL HAMID")["BIRTH-05"]
+    assert r.outcome is Outcome.FAIL
+    assert "does not match" in r.reason
+
+
+def test_unreadable_name_flags():
+    assert default_rules(name=None)["BIRTH-05"].outcome is Outcome.FLAG
+    assert default_rules(confidence=LOW)["BIRTH-05"].outcome is Outcome.FLAG
+
+
+def test_name_without_passport_flags():
+    assert rules(birth_certificate())["BIRTH-05"].outcome is Outcome.FLAG
+
+
+def test_name_one_letter_off_flags_as_possible_misread():
+    # Old low-resolution certificates: OCR drops a letter and the spaces.
+    r = default_rules(name=STUDENT.replace(" ", "")[:-1])["BIRTH-05"]
+    assert r.outcome is Outcome.FLAG
+    assert "misread" in r.reason
