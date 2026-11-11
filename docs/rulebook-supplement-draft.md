@@ -153,7 +153,8 @@ challan's result between extraction and the rules.
   refund request (marked "not valid for any service"), -> NOT_FOUND (FAIL); anything else
   -> UNAVAILABLE (FLAG). Bank-counter challans need bank, branch and date on the site's form
   and are left for manual review (FLAG). No real challan has been checked yet: the sample
-  set has none.
+  set has none. The owner confirmed on 2026-11-11 that real challan numbers may be sent to
+  www.achallan.gov.bd in production.
 * Only those two official hosts are ever contacted, over https; the QR's own URL is never
   opened (the official URL is rebuilt from the number), and redirects elsewhere are refused.
 * `scripts/run_case.py --offline` turns the checks off (ACAD-01 / TAX-04 then FLAG).
