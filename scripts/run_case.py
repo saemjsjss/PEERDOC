@@ -15,7 +15,7 @@ Re-judge a saved reading without OCR (works on Windows too):
 
 Outputs (real personal data; default location is the git-ignored ocr_output/):
 reading.json (raw OCR, saved as soon as OCR finishes), case.json (extracted documents),
-verdict.json (every rule result).
+verdict.json (every rule result), ocr_stats.json (time and GPU/RAM memory per page).
 
 Exit code: 0 PASS, 1 FLAG, 2 FAIL, 3 error (including bad arguments and crashes).
 """
@@ -40,7 +40,7 @@ from hklv_rules.models.verdict import Outcome  # noqa: E402
 
 EXIT = {Outcome.PASS: 0, Outcome.FLAG: 1, Outcome.FAIL: 2}
 EXIT_ERROR = 3
-OUTPUTS = ("reading.json", "case.json", "verdict.json")
+OUTPUTS = ("reading.json", "case.json", "verdict.json", "ocr_stats.json")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -141,8 +141,21 @@ def _run(args) -> int:
             except OSError as e:  # don't throw away a long OCR run over a failed save
                 print(f"Warning: OCR done but reading.json could not be saved ({e}); continuing", file=sys.stderr, flush=True)
 
-        print("Loading OCR models and reading every page (several minutes)...", flush=True)
-        result = asyncio.run(run_case(folder, case_id=case_id, evaluation_date=evaluation_date, on_reading=save_reading))
+        stats = []
+
+        def show_page(stat) -> None:
+            stats.append(stat)
+            print(f"  [{len(stats):>3}] {stat.line()}", flush=True)
+
+        print("Loading OCR models, then reading one page at a time...", flush=True)
+        result = asyncio.run(
+            run_case(folder, case_id=case_id, evaluation_date=evaluation_date, on_reading=save_reading, progress=show_page)
+        )
+        if stats:
+            peak = max(s.gpu_peak_reserved_mb for s in stats) / 1024
+            slowest = max(stats, key=lambda s: s.seconds)
+            print(f"OCR: {len(stats)} pages, {sum(s.seconds for s in stats):.0f}s, GPU peak {peak:.2f} GB, slowest page {slowest.seconds:.0f}s", flush=True)
+            _write_json(out / "ocr_stats.json", [vars(s) for s in stats])
 
     print()
     print(format_verdict(result, show_pages=not args.no_pages))

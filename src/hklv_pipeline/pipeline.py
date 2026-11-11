@@ -94,12 +94,14 @@ async def run_case(
     reader=None,
     threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     on_reading=None,
+    progress=None,
 ) -> PipelineResult:
     """OCR every upload in `folder`, extract the documents, run the rules.
 
     `reader` is a loaded `PageReader` (models take ~20 s to load; a service keeps one).
     `on_reading(reading)` is called as soon as OCR finishes, so a caller can save the
-    expensive part before extraction runs.
+    expensive part before extraction runs. `progress(stat)` is called after every page
+    with its time and memory (`hklv_ocr.readers.PageStat`).
     """
     files = list_case_files(folder)
     if not files:
@@ -109,7 +111,7 @@ async def run_case(
         from hklv_ocr.readers import PageReader  # needs Paddle: WSL OCR environment only
 
         t = time.perf_counter()
-        reader = PageReader()
+        reader = PageReader(progress=progress)
         timings["model_load"] = time.perf_counter() - t
     t = time.perf_counter()
     reading = await reader.read_files(files)

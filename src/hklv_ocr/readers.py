@@ -7,12 +7,22 @@ Usage from async code (the future FastAPI service, or ``scripts/wsl/read_case.py
 
 Paddle inference is blocking and the GPU is a single shared resource, so every model call
 runs in a worker thread (``asyncio.to_thread``) behind one lock.
+
+Memory: pages are rendered and read strictly one at a time, and the GPU cache is released
+(``paddle.device.cuda.empty_cache``) between the two readers and after every page. Paddle's
+allocator otherwise keeps every block it ever reserved; text detection alone briefly fills
+the 8 GB card, and anything run while that is still reserved spills into shared system
+memory, which is many times slower. ``PageReader.stats`` records time and memory per page.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Sequence
+import gc
+import os
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from .reading import Barcode, Box, CaseReading, LayoutBlock, PageReading, TextLine
@@ -32,22 +42,74 @@ def _box(values) -> Box:
     return (x0, y0, x1, y1)
 
 
-def iter_page_images(path: Path, dpi: int = RENDER_DPI) -> Iterator:
-    """Yield one RGB PIL image per page."""
+def page_count(path: Path) -> int:
+    if path.suffix.lower() != ".pdf":
+        return 1
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        return len(pdf)
+    finally:
+        pdf.close()
+
+
+def render_page(path: Path, index: int, dpi: int = RENDER_DPI):
+    """One page as an RGB PIL image (0-based index). Only this page is held in memory."""
     from PIL import Image
 
-    if path.suffix.lower() == ".pdf":
-        import pypdfium2 as pdfium
-
-        pdf = pdfium.PdfDocument(str(path))
-        try:
-            for i in range(len(pdf)):
-                yield pdf[i].render(scale=dpi / 72).to_pil().convert("RGB")
-        finally:
-            pdf.close()
-    else:
+    if path.suffix.lower() != ".pdf":
         with Image.open(path) as img:
-            yield img.convert("RGB")
+            return img.convert("RGB")
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument(str(path))
+    try:
+        page = pdf[index]
+        try:
+            bitmap = page.render(scale=dpi / 72)
+            image = bitmap.to_pil().convert("RGB")
+            bitmap.close()
+            return image
+        finally:
+            page.close()
+    finally:
+        pdf.close()
+
+
+def _system_memory_mb() -> tuple[int | None, int | None]:
+    """(available RAM, swap in use) in MB from /proc/meminfo; (None, None) elsewhere."""
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                key, value = line.split(":", 1)
+                info[key] = int(value.split()[0]) // 1024
+        return info["MemAvailable"], info["SwapTotal"] - info["SwapFree"]
+    except (OSError, KeyError, ValueError):
+        return None, None
+
+
+@dataclass(frozen=True)
+class PageStat:
+    """Time and memory for one page. GPU figures are Paddle's allocator, in MB."""
+
+    source_file: str
+    file_page: int
+    seconds: float
+    gpu_allocated_mb: int
+    gpu_peak_reserved_mb: int  # highest reservation while reading this page
+    gpu_reserved_after_mb: int  # after releasing the cache
+    ram_available_mb: int | None
+    swap_used_mb: int | None
+
+    def line(self) -> str:
+        ram = f", RAM free {self.ram_available_mb / 1024:.1f} GB" if self.ram_available_mb is not None else ""
+        swap = f", swap {self.swap_used_mb} MB" if self.swap_used_mb else ""
+        return (
+            f"{self.source_file} #{self.file_page}: {self.seconds:.1f}s, GPU peak "
+            f"{self.gpu_peak_reserved_mb / 1024:.2f} GB -> {self.gpu_reserved_after_mb / 1024:.2f} GB after clear{ram}{swap}"
+        )
 
 
 def read_barcodes(image) -> tuple[Barcode, ...]:
@@ -66,7 +128,7 @@ def read_barcodes(image) -> tuple[Barcode, ...]:
 
 
 class PageReader:
-    def __init__(self, device: str = "gpu:0") -> None:
+    def __init__(self, device: str = "gpu:0", progress: Callable[[PageStat], None] | None = None) -> None:
         import paddle
         from paddleocr import PaddleOCR, PaddleOCRVL
 
@@ -84,7 +146,13 @@ class PageReader:
             # Model loading leaves ~4 GB of temporary buffers reserved; on an 8 GB card that
             # pushes generation into shared system memory. Hand it back before inference.
             paddle.device.cuda.empty_cache()
+        self._paddle = paddle
+        self._on_gpu = device.startswith("gpu")
+        # For A/B timing only: HKLV_KEEP_GPU_CACHE=1 restores the old behaviour.
+        self._clear_each_page = self._on_gpu and os.environ.get("HKLV_KEEP_GPU_CACHE") != "1"
         self._gpu = asyncio.Lock()
+        self.progress = progress
+        self.stats: list[PageStat] = []
 
     @staticmethod
     def versions() -> dict[str, str]:
@@ -143,24 +211,65 @@ class PageReader:
         import numpy as np
 
         bgr = np.ascontiguousarray(np.array(image)[:, :, ::-1])
-        return self._lines(bgr), self._blocks(bgr), read_barcodes(image)
+        lines = self._lines(bgr)
+        # Measured: text detection on a full 300-dpi page briefly reserves ~4.5 GB on top of
+        # the ~3.5 GB of loaded models, i.e. the whole 8 GB card. Kept reserved, it makes the
+        # slow PaddleOCR-VL generation that follows run in shared system memory (passport
+        # page: 55 s instead of 16 s). Hand it back between the two readers.
+        self._release_gpu_cache()
+        blocks = self._blocks(bgr)
+        return lines, blocks, read_barcodes(image)
+
+    def _release_gpu_cache(self) -> None:
+        if self._clear_each_page:
+            gc.collect()  # drop Python references to finished tensors first
+            self._paddle.device.cuda.empty_cache()
+
+    def _gpu_mb(self) -> tuple[int, int]:
+        if not self._on_gpu:
+            return 0, 0
+        cuda = self._paddle.device.cuda
+        return int(cuda.memory_allocated() / 2**20), int(cuda.memory_reserved() / 2**20)
+
+    def _read_one_page(self, path: Path, index: int):
+        """Render, read and release one page (runs in the worker thread)."""
+        t = time.perf_counter()
+        if self._on_gpu:
+            self._paddle.device.cuda.reset_max_memory_reserved()
+        image = render_page(path, index)
+        size = (image.width, image.height)
+        try:
+            lines, blocks, barcodes = self._read_image(image)
+        finally:
+            image.close()
+            del image
+        peak = int(self._paddle.device.cuda.max_memory_reserved() / 2**20) if self._on_gpu else 0
+        allocated, _ = self._gpu_mb()
+        self._release_gpu_cache()
+        _, reserved_after = self._gpu_mb()
+        ram, swap = _system_memory_mb()
+        stat = PageStat(path.name, index + 1, time.perf_counter() - t, allocated, peak, reserved_after, ram, swap)
+        return size, lines, blocks, barcodes, stat
 
     # -- async API ---------------------------------------------------------------------
 
     async def read_file(self, path: Path, first_page_no: int = 1) -> list[PageReading]:
-        images = await asyncio.to_thread(lambda: list(iter_page_images(path)))
+        """Read one file page by page: render, OCR, release, then the next page."""
         pages = []
-        for i, image in enumerate(images):
+        for i in range(await asyncio.to_thread(page_count, path)):
             async with self._gpu:
-                lines, blocks, barcodes = await asyncio.to_thread(self._read_image, image)
+                (width, height), lines, blocks, barcodes, stat = await asyncio.to_thread(self._read_one_page, path, i)
+            self.stats.append(stat)
+            if self.progress is not None:
+                self.progress(stat)
             pages.append(
                 PageReading(
                     page_no=first_page_no + i,
                     source_file=path.name,
                     file_page=i + 1,
                     from_image_file=path.suffix.lower() in IMAGE_SUFFIXES,
-                    width=image.width,
-                    height=image.height,
+                    width=width,
+                    height=height,
                     lines=lines,
                     blocks=blocks,
                     barcodes=barcodes,

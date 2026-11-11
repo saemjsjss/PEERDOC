@@ -20,8 +20,9 @@ verdict and every FAIL and FLAG reason.
 * Relative and Windows paths work from wherever the command is run.
 
 First automated verdict on the sample set (2026-11-11): **FLAG**, 21 checks passed, the only
-flag being ENGINE-COVERAGE (rules not yet written). OCR took 40 minutes; a second full read
-gave the same 182 extracted values and confidences as the first.
+flag being ENGINE-COVERAGE (rules not yet written). A second full read gave the same 182
+extracted values and confidences as the first. OCR of the 34 pages now takes about 7 minutes
+(see "GPU memory and speed" below); it took 40 before.
 
 Pass 1 turns the uploaded files into the typed documents the rules engine checks. It runs
 in two halves so that the GPU part stays small and everything else is testable anywhere.
@@ -149,10 +150,37 @@ These numbers are placeholders until calibrated on more real cases.
   PP-OCRv6 misses some boxes, so the value comes from PaddleOCR-VL alone at 0.60), two
   NID stamps (seal away from the notary text, 0.82-0.89), bank statement holder (0.88).
 
-Speed: the full set took 35 minutes; some files took 2-4x longer than the same file read
-alone (the affidavit: 124 s in the batch, 31 s alone, identical output). The GPU was at
-7.3 of 8 GB during the batch, so memory pressure is the likely cause; releasing the cache
-between files is the next thing to try.
+### GPU memory and speed (measured 2026-11-11, RTX 5060 8 GB)
+
+Peak GPU memory per reader stage, measured page by page:
+
+| Stage | Time per page | Paddle GPU peak |
+|---|---|---|
+| Loaded models, idle | | 3.2-3.8 GB |
+| PP-OCRv6 text lines (full 300-dpi page) | 2-4 s | **7.6-8.7 GB** (detection on ~2500x3500 px) |
+| PaddleOCR-VL layout + text | 7-43 s | 3.7-5.3 GB |
+| ZXing | 0.1 s | none |
+
+Paddle's allocator keeps what it reserves. Text detection reserves the whole card for a few
+seconds, and PaddleOCR-VL, the slow stage, then ran with the card still full, so it spilled
+into shared system memory. Clearing the cache only once per page was not enough: the
+passport page took 55 s that way, against 16 s with the cache also cleared **between** the
+two readers.
+
+The reader now renders one page at a time and calls `paddle.device.cuda.empty_cache()`
+between the readers and after every page. Full sample set, same machine:
+
+| | OCR time | Slowest page | Output |
+|---|---|---|---|
+| Before | 2,430 s (40.5 min) | ~150 s | |
+| After | **433 s (7.2 min)** | 49 s | raw text identical on all 34 pages; all 182 extracted values identical |
+
+Every run prints time and memory per page and saves them to `ocr_stats.json`.
+`HKLV_KEEP_GPU_CACHE=1` restores the old behaviour, for A/B timing only.
+
+Still open: text detection itself peaks at the card's limit. Capping its input size
+(`text_det_limit_type="max"`) would remove that spike, but it changes what is detected and
+needs its own accuracy check, especially on MRZ lines.
 
 ## 5. Known gaps
 
