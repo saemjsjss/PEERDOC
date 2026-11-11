@@ -23,6 +23,9 @@ class Evidence(Frozen):
     field: str
     value: str | None = None
     page: int | None = None
+    # How sure Pass 1 was of `value` (0..1), so a reviewer can see why a rule FLAGged it.
+    # None for values that aren't OCR readings (QR codes, online checks).
+    confidence: float | None = None
 
 
 class RuleResult(Frozen):

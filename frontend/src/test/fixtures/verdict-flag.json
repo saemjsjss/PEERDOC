@@ -1,0 +1,1712 @@
+{
+ "case_id": "fictional-0417",
+ "evaluation_date": "2026-11-10",
+ "outcome": "FLAG",
+ "summary": "FLAG: needs manual review; 3 rule(s) flagged (NID-02, BIRTH-03, BIRTH-04)",
+ "counts": {
+  "passed": 51,
+  "flagged": 3,
+  "failed": 0
+ },
+ "failures": [],
+ "flags": [
+  {
+   "rule_id": "NID-02",
+   "outcome": "FLAG",
+   "reason": "NID n-mother (Mother): Notarisation could not be confirmed (low OCR confidence)",
+   "evidence": [
+    {
+     "doc_id": "n-mother",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.82
+    },
+    {
+     "doc_id": "n-mother",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.82
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-03",
+   "outcome": "FLAG",
+   "reason": "Birth Certificate birth: date of birth read with low OCR confidence",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.6
+    },
+    {
+     "doc_id": "passport",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-04",
+   "outcome": "FLAG",
+   "reason": "Birth Certificate birth: Birth Registration Number 20012691234567890 read with low OCR confidence",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "registration_number",
+     "value": "20012691234567890",
+     "page": 1,
+     "confidence": 0.6
+    }
+   ]
+  }
+ ],
+ "results": [
+  {
+   "rule_id": "REQ-01",
+   "outcome": "PASS",
+   "reason": "Passport present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-02",
+   "outcome": "PASS",
+   "reason": "Photo present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-03",
+   "outcome": "PASS",
+   "reason": "Birth Certificate present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-04",
+   "outcome": "PASS",
+   "reason": "Family Relationship Certificate present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-05",
+   "outcome": "PASS",
+   "reason": "Bank Solvency and Bank Statement present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-06",
+   "outcome": "PASS",
+   "reason": "Trade License or Employment Certificate present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-07",
+   "outcome": "PASS",
+   "reason": "TIN Certificate present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-08",
+   "outcome": "PASS",
+   "reason": "Father NID (n-father) present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-09",
+   "outcome": "PASS",
+   "reason": "Mother NID (n-mother) present",
+   "evidence": []
+  },
+  {
+   "rule_id": "REQ-10",
+   "outcome": "PASS",
+   "reason": "Optional documents: Income Tax not submitted; Student NID not submitted; IELTS/TOPIK not submitted",
+   "evidence": []
+  },
+  {
+   "rule_id": "PASSPORT-01",
+   "outcome": "PASS",
+   "reason": "Passport passport: valid until 01-01-2031, at least 12 months after 10-11-2026; printed expiry matches MRZ expiry 01-01-2031; printed name 'TANVIR AHMED' matches MRZ name 'TANVIR AHMED'",
+   "evidence": [
+    {
+     "doc_id": "passport",
+     "field": "date_of_expiry",
+     "value": "2031-01-01",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "printed_date_of_expiry",
+     "value": "2031-01-01",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "given_names",
+     "value": "TANVIR",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "surname",
+     "value": "AHMED",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "mrz_given_names",
+     "value": "TANVIR",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "mrz_surname",
+     "value": "AHMED",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-ASSIGN",
+   "outcome": "PASS",
+   "reason": "NID n-father assigned to Father: 'MD. KAMAL UDDIN' matches FatherRef 'MD. KAMAL UDDIN'",
+   "evidence": [
+    {
+     "doc_id": "n-father",
+     "field": "cardholder_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-ASSIGN",
+   "outcome": "PASS",
+   "reason": "NID n-mother assigned to Mother: 'RINA BEGUM' matches MotherRef 'RINA BEGUM'",
+   "evidence": [
+    {
+     "doc_id": "n-mother",
+     "field": "cardholder_name",
+     "value": "RINA BEGUM",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-01",
+   "outcome": "PASS",
+   "reason": "NID n-father (Father): English translation page present",
+   "evidence": [
+    {
+     "doc_id": "n-father",
+     "field": "has_english_translation",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-02",
+   "outcome": "PASS",
+   "reason": "NID n-father (Father): Notary Public/Advocate text and stamp present",
+   "evidence": [
+    {
+     "doc_id": "n-father",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "n-father",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-03",
+   "outcome": "PASS",
+   "reason": "NID n-father (Father): NID number: number_on_card and number_on_translation match (4441234567)",
+   "evidence": [
+    {
+     "doc_id": "n-father",
+     "field": "number_on_card",
+     "value": "4441234567",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "n-father",
+     "field": "number_on_translation",
+     "value": "4441234567",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-01",
+   "outcome": "PASS",
+   "reason": "NID n-mother (Mother): English translation page present",
+   "evidence": [
+    {
+     "doc_id": "n-mother",
+     "field": "has_english_translation",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-02",
+   "outcome": "FLAG",
+   "reason": "NID n-mother (Mother): Notarisation could not be confirmed (low OCR confidence)",
+   "evidence": [
+    {
+     "doc_id": "n-mother",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.82
+    },
+    {
+     "doc_id": "n-mother",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.82
+    }
+   ]
+  },
+  {
+   "rule_id": "NID-03",
+   "outcome": "PASS",
+   "reason": "NID n-mother (Mother): NID number: number_on_card and number_on_translation match (6661234567)",
+   "evidence": [
+    {
+     "doc_id": "n-mother",
+     "field": "number_on_card",
+     "value": "6661234567",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "n-mother",
+     "field": "number_on_translation",
+     "value": "6661234567",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-01",
+   "outcome": "PASS",
+   "reason": "Birth Certificate birth: Document is in English; no translation needed",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "language",
+     "value": "Language.ENGLISH",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "birth",
+     "field": "has_english_translation",
+     "value": null,
+     "page": null,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-02",
+   "outcome": "PASS",
+   "reason": "Birth Certificate birth: Notary Public/Advocate text and stamp present",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "birth",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-03",
+   "outcome": "FLAG",
+   "reason": "Birth Certificate birth: date of birth read with low OCR confidence",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.6
+    },
+    {
+     "doc_id": "passport",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BIRTH-04",
+   "outcome": "FLAG",
+   "reason": "Birth Certificate birth: Birth Registration Number 20012691234567890 read with low OCR confidence",
+   "evidence": [
+    {
+     "doc_id": "birth",
+     "field": "registration_number",
+     "value": "20012691234567890",
+     "page": 1,
+     "confidence": 0.6
+    }
+   ]
+  },
+  {
+   "rule_id": "FRC-01",
+   "outcome": "PASS",
+   "reason": "Issued by a Union Parishad",
+   "evidence": [
+    {
+     "doc_id": "frc",
+     "field": "issuer_text",
+     "value": "03 NO. CHANDLA UNION PARISHAD",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "FRC-02",
+   "outcome": "PASS",
+   "reason": "SELF row: 'TANVIR AHMED S/O: KAMAL UDDIN & RINA BEGUM' matches StudentRef 'TANVIR AHMED'",
+   "evidence": [
+    {
+     "doc_id": "frc",
+     "field": "members.name",
+     "value": "TANVIR AHMED S/O: KAMAL UDDIN & RINA BEGUM",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "FRC-03",
+   "outcome": "PASS",
+   "reason": "FATHER row: 'MOHAMMAD KAMAL UDDIN' matches FatherRef 'MD. KAMAL UDDIN'; MOTHER row: 'RINA BEGUM' matches MotherRef 'RINA BEGUM'",
+   "evidence": [
+    {
+     "doc_id": "frc",
+     "field": "members.name",
+     "value": "MOHAMMAD KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "frc",
+     "field": "members.name",
+     "value": "RINA BEGUM",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "FRC-04",
+   "outcome": "PASS",
+   "reason": "Dated 09-09-2026, within 3 months (on or after 10-08-2026)",
+   "evidence": [
+    {
+     "doc_id": "frc",
+     "field": "issue_date",
+     "value": "2026-09-09",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "FRC-05",
+   "outcome": "PASS",
+   "reason": "Notary Public/Advocate text and stamp present",
+   "evidence": [
+    {
+     "doc_id": "frc",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "frc",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BANK-01",
+   "outcome": "PASS",
+   "reason": "Bank Solvency solvency assigned to Father: 'MD. KAMAL UDDIN' matches FatherRef 'MD. KAMAL UDDIN'",
+   "evidence": [
+    {
+     "doc_id": "solvency",
+     "field": "account_holder",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BANK-02",
+   "outcome": "PASS",
+   "reason": "Bank Solvency solvency: account number 0123456789 matches Bank Statement statement",
+   "evidence": [
+    {
+     "doc_id": "solvency",
+     "field": "account_number",
+     "value": "0123456789",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "statement",
+     "field": "account_number",
+     "value": "0123456789",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BANK-03",
+   "outcome": "PASS",
+   "reason": "Bank Solvency solvency: letter date 20-10-2026 matches Bank Statement statement date exactly",
+   "evidence": [
+    {
+     "doc_id": "solvency",
+     "field": "letter_date",
+     "value": "2026-10-20",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "statement",
+     "field": "statement_date",
+     "value": "2026-10-20",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "BANK-04",
+   "outcome": "PASS",
+   "reason": "Minimum balance not checked (Rulebook BANK-04: do not check); bank documents solvency, statement",
+   "evidence": []
+  },
+  {
+   "rule_id": "TRADE-01",
+   "outcome": "PASS",
+   "reason": "Trade License trade: Document is in English; no translation needed",
+   "evidence": [
+    {
+     "doc_id": "trade",
+     "field": "language",
+     "value": "Language.ENGLISH",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "has_english_translation",
+     "value": null,
+     "page": null,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "TRADE-02",
+   "outcome": "PASS",
+   "reason": "Trade License trade: Notary Public/Advocate text and stamp present",
+   "evidence": [
+    {
+     "doc_id": "trade",
+     "field": "notary.notary_text_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "notary.stamp_present",
+     "value": "True",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "TRADE-03",
+   "outcome": "PASS",
+   "reason": "Trade License trade: fiscal year 2026-2027 is current; current fiscal year on 10-11-2026 is 2026-2027 (July-June)",
+   "evidence": [
+    {
+     "doc_id": "trade",
+     "field": "fiscal_year",
+     "value": "2026-2027",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "TRADE-04",
+   "outcome": "PASS",
+   "reason": "Trade License trade assigned to Father: 'MD. KAMAL UDDIN' matches FatherRef 'MD. KAMAL UDDIN'",
+   "evidence": [
+    {
+     "doc_id": "trade",
+     "field": "owner_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "TIN-01",
+   "outcome": "PASS",
+   "reason": "TIN Certificate tin: QR code decoded",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "qr_decoded",
+     "value": "True",
+     "page": null,
+     "confidence": 1.0
+    }
+   ]
+  },
+  {
+   "rule_id": "TIN-02",
+   "outcome": "PASS",
+   "reason": "TIN Certificate tin: tin_printed and tin_from_qr match (123456789012)",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "tin_printed",
+     "value": "123456789012",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "tin",
+     "field": "tin_from_qr",
+     "value": "123456789012",
+     "page": 1,
+     "confidence": 1.0
+    }
+   ]
+  },
+  {
+   "rule_id": "TIN-03",
+   "outcome": "PASS",
+   "reason": "TIN Certificate tin: taxpayer 'MD. KAMAL UDDIN' matches Trade License owner 'MD. KAMAL UDDIN' (trade)",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "taxpayer_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "owner_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-01",
+   "outcome": "PASS",
+   "reason": "e-Apostille apostille-20: verified on the official e-Apostille site (https://apostille.mygov.bd/application-details/100000000001)",
+   "evidence": [
+    {
+     "doc_id": "apostille-20",
+     "field": "qr_url",
+     "value": "https://apostille.mygov.bd/application-details/100000000001",
+     "page": 20,
+     "confidence": 1.0
+    },
+    {
+     "doc_id": "apostille-20",
+     "field": "online.status",
+     "value": "VERIFIED",
+     "page": 20,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-01",
+   "outcome": "PASS",
+   "reason": "e-Apostille apostille-22: verified on the official e-Apostille site (https://apostille.mygov.bd/application-details/100000000001)",
+   "evidence": [
+    {
+     "doc_id": "apostille-22",
+     "field": "qr_url",
+     "value": "https://apostille.mygov.bd/application-details/100000000001",
+     "page": 22,
+     "confidence": 1.0
+    },
+    {
+     "doc_id": "apostille-22",
+     "field": "online.status",
+     "value": "VERIFIED",
+     "page": 22,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-01",
+   "outcome": "PASS",
+   "reason": "e-Apostille apostille-24: verified on the official e-Apostille site (https://apostille.mygov.bd/application-details/100000000001)",
+   "evidence": [
+    {
+     "doc_id": "apostille-24",
+     "field": "qr_url",
+     "value": "https://apostille.mygov.bd/application-details/100000000001",
+     "page": 24,
+     "confidence": 1.0
+    },
+    {
+     "doc_id": "apostille-24",
+     "field": "online.status",
+     "value": "VERIFIED",
+     "page": 24,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-01",
+   "outcome": "PASS",
+   "reason": "e-Apostille apostille-26: verified on the official e-Apostille site (https://apostille.mygov.bd/application-details/100000000001)",
+   "evidence": [
+    {
+     "doc_id": "apostille-26",
+     "field": "qr_url",
+     "value": "https://apostille.mygov.bd/application-details/100000000001",
+     "page": 26,
+     "confidence": 1.0
+    },
+    {
+     "doc_id": "apostille-26",
+     "field": "online.status",
+     "value": "VERIFIED",
+     "page": 26,
+     "confidence": null
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-02",
+   "outcome": "PASS",
+   "reason": "SSC certificate (cert-ssc) and transcript (transcript-ssc) both present",
+   "evidence": [
+    {
+     "doc_id": "cert-ssc",
+     "field": "level",
+     "value": "AcademicLevel.SSC",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "transcript-ssc",
+     "field": "level",
+     "value": "AcademicLevel.SSC",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-02",
+   "outcome": "PASS",
+   "reason": "HSC certificate (cert-hsc) and transcript (transcript-hsc) both present",
+   "evidence": [
+    {
+     "doc_id": "cert-hsc",
+     "field": "level",
+     "value": "AcademicLevel.HSC",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "transcript-hsc",
+     "field": "level",
+     "value": "AcademicLevel.HSC",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-03",
+   "outcome": "PASS",
+   "reason": "Valid track SSC + HSC (levels found: SSC, HSC)",
+   "evidence": [
+    {
+     "doc_id": "cert-ssc",
+     "field": "level",
+     "value": "AcademicLevel.SSC",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "cert-hsc",
+     "field": "level",
+     "value": "AcademicLevel.HSC",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "transcript-ssc",
+     "field": "level",
+     "value": "AcademicLevel.SSC",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "transcript-hsc",
+     "field": "level",
+     "value": "AcademicLevel.HSC",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-04",
+   "outcome": "PASS",
+   "reason": "Certificate cert-ssc (SSC): name: 'TANVIR AHMED' matches StudentRef 'TANVIR AHMED'; date of birth 15-03-2001 matches passport passport",
+   "evidence": [
+    {
+     "doc_id": "cert-ssc",
+     "field": "student_name",
+     "value": "TANVIR AHMED",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "cert-ssc",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "passport",
+     "field": "date_of_birth",
+     "value": "2001-03-15",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-04",
+   "outcome": "PASS",
+   "reason": "Certificate cert-hsc (HSC): name: 'TANVIR AHMED' matches StudentRef 'TANVIR AHMED'",
+   "evidence": [
+    {
+     "doc_id": "cert-hsc",
+     "field": "student_name",
+     "value": "TANVIR AHMED",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-04",
+   "outcome": "PASS",
+   "reason": "Transcript transcript-ssc (SSC): name: 'TANVIR AHMED' matches StudentRef 'TANVIR AHMED'",
+   "evidence": [
+    {
+     "doc_id": "transcript-ssc",
+     "field": "student_name",
+     "value": "TANVIR AHMED",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "ACAD-04",
+   "outcome": "PASS",
+   "reason": "Transcript transcript-hsc (HSC): name: 'TANVIR AHMED' matches StudentRef 'TANVIR AHMED'",
+   "evidence": [
+    {
+     "doc_id": "transcript-hsc",
+     "field": "student_name",
+     "value": "TANVIR AHMED",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "TAX-01",
+   "outcome": "PASS",
+   "reason": "No Income Tax documents submitted (optional)",
+   "evidence": []
+  },
+  {
+   "rule_id": "CHAIN-01",
+   "outcome": "PASS",
+   "reason": "TIN taxpayer 'MD. KAMAL UDDIN' and Trade License owner 'MD. KAMAL UDDIN' are identical",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "taxpayer_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "owner_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "CHAIN-02",
+   "outcome": "PASS",
+   "reason": "TIN and Trade License both belong to the Father",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "taxpayer_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "owner_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  },
+  {
+   "rule_id": "CHAIN-03",
+   "outcome": "PASS",
+   "reason": "Neither TIN nor Trade License is in the student's name",
+   "evidence": [
+    {
+     "doc_id": "tin",
+     "field": "taxpayer_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    },
+    {
+     "doc_id": "trade",
+     "field": "owner_name",
+     "value": "MD. KAMAL UDDIN",
+     "page": 1,
+     "confidence": 0.99
+    }
+   ]
+  }
+ ],
+ "documents": [
+  {
+   "doc_id": "passport",
+   "pages": [],
+   "kind": "passport",
+   "passport_number": {
+    "value": "K12345678",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "surname": {
+    "value": "AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "given_names": {
+    "value": "TANVIR",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "mrz_surname": {
+    "value": "AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "mrz_given_names": {
+    "value": "TANVIR",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": "2001-03-15",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_expiry": {
+    "value": "2031-01-01",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "printed_date_of_expiry": {
+    "value": "2031-01-01",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "father_name": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "mother_name": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   }
+  },
+  {
+   "doc_id": "birth",
+   "pages": [],
+   "kind": "birth_certificate",
+   "registration_number": {
+    "value": "20012691234567890",
+    "confidence": 0.6,
+    "source_page": 1
+   },
+   "name": {
+    "value": "TANVIR AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": "2001-03-15",
+    "confidence": 0.6,
+    "source_page": 1
+   },
+   "father_name": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "mother_name": {
+    "value": "RINA BEGUM",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "language": {
+    "value": "ENGLISH",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "has_english_translation": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "notary": {
+    "notary_text_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    },
+    "stamp_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    }
+   }
+  },
+  {
+   "doc_id": "photo",
+   "pages": [],
+   "kind": "photo"
+  },
+  {
+   "doc_id": "frc",
+   "pages": [],
+   "kind": "frc",
+   "issuer_text": {
+    "value": "03 NO. CHANDLA UNION PARISHAD",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "members": [
+    {
+     "name": {
+      "value": "TANVIR AHMED S/O: KAMAL UDDIN & RINA BEGUM",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "relation": {
+      "value": "SELF",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "date_of_birth": {
+      "value": null,
+      "confidence": 0.0,
+      "source_page": null
+     }
+    },
+    {
+     "name": {
+      "value": "MOHAMMAD KAMAL UDDIN",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "relation": {
+      "value": "FATHER",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "date_of_birth": {
+      "value": null,
+      "confidence": 0.0,
+      "source_page": null
+     }
+    },
+    {
+     "name": {
+      "value": "RINA BEGUM",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "relation": {
+      "value": "MOTHER",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "date_of_birth": {
+      "value": null,
+      "confidence": 0.0,
+      "source_page": null
+     }
+    },
+    {
+     "name": {
+      "value": "SADIA AHMED",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "relation": {
+      "value": "SISTER",
+      "confidence": 0.99,
+      "source_page": 1
+     },
+     "date_of_birth": {
+      "value": null,
+      "confidence": 0.0,
+      "source_page": null
+     }
+    }
+   ],
+   "issue_date": {
+    "value": "2026-09-09",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "registration_date": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "notary": {
+    "notary_text_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    },
+    "stamp_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    }
+   }
+  },
+  {
+   "doc_id": "solvency",
+   "pages": [],
+   "kind": "bank_solvency",
+   "account_holder": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "account_number": {
+    "value": "0123456789",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "letter_date": {
+    "value": "2026-10-20",
+    "confidence": 0.99,
+    "source_page": 1
+   }
+  },
+  {
+   "doc_id": "statement",
+   "pages": [],
+   "kind": "bank_statement",
+   "account_holder": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "account_number": {
+    "value": "0123456789",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "statement_date": {
+    "value": "2026-10-20",
+    "confidence": 0.99,
+    "source_page": 1
+   }
+  },
+  {
+   "doc_id": "trade",
+   "pages": [],
+   "kind": "trade_license",
+   "license_number": {
+    "value": "TRAD/DNCC/012345/2026",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "owner_name": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "fiscal_year": {
+    "value": "2026-2027",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "language": {
+    "value": "ENGLISH",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "has_english_translation": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "notary": {
+    "notary_text_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    },
+    "stamp_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    }
+   }
+  },
+  {
+   "doc_id": "tin",
+   "pages": [],
+   "kind": "tin_certificate",
+   "taxpayer_name": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "tin_printed": {
+    "value": "123456789012",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "qr_decoded": true,
+   "tin_from_qr": "123456789012"
+  },
+  {
+   "doc_id": "n-father",
+   "pages": [],
+   "kind": "nid",
+   "variant": "DIGITAL",
+   "cardholder_name": {
+    "value": "MD. KAMAL UDDIN",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "number_on_card": {
+    "value": "4441234567",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "number_on_translation": {
+    "value": "4441234567",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "has_english_translation": {
+    "value": true,
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "notary": {
+    "notary_text_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    },
+    "stamp_present": {
+     "value": true,
+     "confidence": 0.99,
+     "source_page": 1
+    }
+   }
+  },
+  {
+   "doc_id": "apostille-20",
+   "pages": [
+    20
+   ],
+   "kind": "e_apostille",
+   "qr_decoded": true,
+   "qr_url": "https://apostille.mygov.bd/application-details/100000000001",
+   "online": {
+    "status": "VERIFIED",
+    "detail": "",
+    "amount": null
+   }
+  },
+  {
+   "doc_id": "cert-ssc",
+   "pages": [
+    21
+   ],
+   "kind": "academic_certificate",
+   "level": {
+    "value": "SSC",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "student_name": {
+    "value": "TANVIR AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": "2001-03-15",
+    "confidence": 0.99,
+    "source_page": 1
+   }
+  },
+  {
+   "doc_id": "apostille-22",
+   "pages": [
+    22
+   ],
+   "kind": "e_apostille",
+   "qr_decoded": true,
+   "qr_url": "https://apostille.mygov.bd/application-details/100000000001",
+   "online": {
+    "status": "VERIFIED",
+    "detail": "",
+    "amount": null
+   }
+  },
+  {
+   "doc_id": "transcript-ssc",
+   "pages": [
+    23
+   ],
+   "kind": "academic_transcript",
+   "level": {
+    "value": "SSC",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "student_name": {
+    "value": "TANVIR AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   }
+  },
+  {
+   "doc_id": "apostille-24",
+   "pages": [
+    24
+   ],
+   "kind": "e_apostille",
+   "qr_decoded": true,
+   "qr_url": "https://apostille.mygov.bd/application-details/100000000001",
+   "online": {
+    "status": "VERIFIED",
+    "detail": "",
+    "amount": null
+   }
+  },
+  {
+   "doc_id": "cert-hsc",
+   "pages": [
+    25
+   ],
+   "kind": "academic_certificate",
+   "level": {
+    "value": "HSC",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "student_name": {
+    "value": "TANVIR AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   }
+  },
+  {
+   "doc_id": "apostille-26",
+   "pages": [
+    26
+   ],
+   "kind": "e_apostille",
+   "qr_decoded": true,
+   "qr_url": "https://apostille.mygov.bd/application-details/100000000001",
+   "online": {
+    "status": "VERIFIED",
+    "detail": "",
+    "amount": null
+   }
+  },
+  {
+   "doc_id": "transcript-hsc",
+   "pages": [
+    27
+   ],
+   "kind": "academic_transcript",
+   "level": {
+    "value": "HSC",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "student_name": {
+    "value": "TANVIR AHMED",
+    "confidence": 0.99,
+    "source_page": 1
+   }
+  },
+  {
+   "doc_id": "n-mother",
+   "pages": [],
+   "kind": "nid",
+   "variant": "DIGITAL",
+   "cardholder_name": {
+    "value": "RINA BEGUM",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "date_of_birth": {
+    "value": null,
+    "confidence": 0.0,
+    "source_page": null
+   },
+   "number_on_card": {
+    "value": "6661234567",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "number_on_translation": {
+    "value": "6661234567",
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "has_english_translation": {
+    "value": true,
+    "confidence": 0.99,
+    "source_page": 1
+   },
+   "notary": {
+    "notary_text_present": {
+     "value": true,
+     "confidence": 0.82,
+     "source_page": 1
+    },
+    "stamp_present": {
+     "value": true,
+     "confidence": 0.82,
+     "source_page": 1
+    }
+   }
+  }
+ ],
+ "pages": [
+  {
+   "page_no": 1,
+   "source_file": "passport.pdf",
+   "file_page": 1,
+   "kind": "passport",
+   "reason": "fictional",
+   "doc_id": "passport"
+  },
+  {
+   "page_no": 2,
+   "source_file": "birth.pdf",
+   "file_page": 1,
+   "kind": "birth_certificate",
+   "reason": "fictional",
+   "doc_id": "birth"
+  },
+  {
+   "page_no": 3,
+   "source_file": "photo.pdf",
+   "file_page": 1,
+   "kind": "photo",
+   "reason": "fictional",
+   "doc_id": "photo"
+  },
+  {
+   "page_no": 4,
+   "source_file": "frc.pdf",
+   "file_page": 1,
+   "kind": "frc",
+   "reason": "fictional",
+   "doc_id": "frc"
+  },
+  {
+   "page_no": 5,
+   "source_file": "solvency.pdf",
+   "file_page": 1,
+   "kind": "bank_solvency",
+   "reason": "fictional",
+   "doc_id": "solvency"
+  },
+  {
+   "page_no": 6,
+   "source_file": "statement.pdf",
+   "file_page": 1,
+   "kind": "bank_statement",
+   "reason": "fictional",
+   "doc_id": "statement"
+  },
+  {
+   "page_no": 7,
+   "source_file": "trade.pdf",
+   "file_page": 1,
+   "kind": "trade_license",
+   "reason": "fictional",
+   "doc_id": "trade"
+  },
+  {
+   "page_no": 8,
+   "source_file": "tin.pdf",
+   "file_page": 1,
+   "kind": "tin_certificate",
+   "reason": "fictional",
+   "doc_id": "tin"
+  },
+  {
+   "page_no": 9,
+   "source_file": "n-father.pdf",
+   "file_page": 1,
+   "kind": "nid",
+   "reason": "fictional",
+   "doc_id": "n-father"
+  },
+  {
+   "page_no": 10,
+   "source_file": "apostille-20.pdf",
+   "file_page": 1,
+   "kind": "e_apostille",
+   "reason": "fictional",
+   "doc_id": "apostille-20"
+  },
+  {
+   "page_no": 11,
+   "source_file": "cert-ssc.pdf",
+   "file_page": 1,
+   "kind": "academic_certificate",
+   "reason": "fictional",
+   "doc_id": "cert-ssc"
+  },
+  {
+   "page_no": 12,
+   "source_file": "apostille-22.pdf",
+   "file_page": 1,
+   "kind": "e_apostille",
+   "reason": "fictional",
+   "doc_id": "apostille-22"
+  },
+  {
+   "page_no": 13,
+   "source_file": "transcript-ssc.pdf",
+   "file_page": 1,
+   "kind": "academic_transcript",
+   "reason": "fictional",
+   "doc_id": "transcript-ssc"
+  },
+  {
+   "page_no": 14,
+   "source_file": "apostille-24.pdf",
+   "file_page": 1,
+   "kind": "e_apostille",
+   "reason": "fictional",
+   "doc_id": "apostille-24"
+  },
+  {
+   "page_no": 15,
+   "source_file": "cert-hsc.pdf",
+   "file_page": 1,
+   "kind": "academic_certificate",
+   "reason": "fictional",
+   "doc_id": "cert-hsc"
+  },
+  {
+   "page_no": 16,
+   "source_file": "apostille-26.pdf",
+   "file_page": 1,
+   "kind": "e_apostille",
+   "reason": "fictional",
+   "doc_id": "apostille-26"
+  },
+  {
+   "page_no": 17,
+   "source_file": "transcript-hsc.pdf",
+   "file_page": 1,
+   "kind": "academic_transcript",
+   "reason": "fictional",
+   "doc_id": "transcript-hsc"
+  },
+  {
+   "page_no": 18,
+   "source_file": "n-mother.pdf",
+   "file_page": 1,
+   "kind": "nid",
+   "reason": "fictional",
+   "doc_id": "n-mother"
+  }
+ ],
+ "online": [
+  {
+   "doc_id": "apostille-20",
+   "kind": "e_apostille",
+   "status": "VERIFIED",
+   "detail": "fictional register entry"
+  },
+  {
+   "doc_id": "apostille-22",
+   "kind": "e_apostille",
+   "status": "VERIFIED",
+   "detail": "fictional register entry"
+  },
+  {
+   "doc_id": "apostille-24",
+   "kind": "e_apostille",
+   "status": "VERIFIED",
+   "detail": "fictional register entry"
+  },
+  {
+   "doc_id": "apostille-26",
+   "kind": "e_apostille",
+   "status": "VERIFIED",
+   "detail": "fictional register entry"
+  }
+ ],
+ "files": {
+  "accepted": [
+   "passport.pdf",
+   "birth.pdf",
+   "photo.pdf",
+   "frc.pdf",
+   "solvency.pdf",
+   "statement.pdf",
+   "trade.pdf",
+   "tin.pdf",
+   "n-father.pdf",
+   "apostille-20.pdf",
+   "cert-ssc.pdf",
+   "apostille-22.pdf",
+   "transcript-ssc.pdf",
+   "apostille-24.pdf",
+   "cert-hsc.pdf",
+   "apostille-26.pdf",
+   "transcript-hsc.pdf",
+   "n-mother.pdf"
+  ],
+  "ignored": [
+   {
+    "name": "notes.txt",
+    "reason": "not a PDF, image or ZIP"
+   }
+  ],
+  "ignored_more": 0
+ },
+ "timings": {
+  "ocr": 512.3,
+  "extraction": 0.2,
+  "online": 3.1,
+  "rules": 0.0
+ }
+}

@@ -4,7 +4,7 @@ import { ApiError, deleteJob, submitJob, type FileReport, type SubmitOptions } f
 import { ProgressScreen } from './components/ProgressScreen'
 import { UploadScreen } from './components/UploadScreen'
 import { EMPTY_DRAFT, type Draft } from './lib/draft'
-import { VerdictSummary } from './components/VerdictSummary'
+import { ResultsScreen } from './components/ResultsScreen'
 import { useJobPolling } from './hooks/useJobPolling'
 
 // Only the job id is remembered (so a page refresh during the ~8-minute run resumes
@@ -148,7 +148,7 @@ export default function App() {
 
   let screen
   if (job?.status === 'done' && job.result) {
-    screen = <VerdictSummary verdict={job.result} onNewCase={newCase} />
+    screen = <ResultsScreen verdict={job.result} onNewCase={newCase} />
   } else if (job?.status === 'failed') {
     screen = (
       <section className="mx-auto w-full max-w-2xl rounded-2xl border border-fail/30 bg-fail-soft p-8">
@@ -179,7 +179,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-line bg-white">
+      <header className="border-b border-line bg-white print:hidden">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <img src="/favicon.svg" alt="" className="h-8 w-8" />
@@ -191,8 +191,8 @@ export default function App() {
           <ServerBadge status={server} />
         </div>
       </header>
-      <main className="flex-1 px-4 py-10 sm:px-6">{screen}</main>
-      <footer className="px-4 py-6 text-center text-xs text-muted">
+      <main className="flex-1 px-4 py-10 sm:px-6 print:p-0">{screen}</main>
+      <footer className="px-4 py-6 text-center text-xs text-muted print:hidden">
         Files are processed on this computer and deleted after each check.
       </footer>
     </div>

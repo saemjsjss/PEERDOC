@@ -80,7 +80,7 @@ Response (200):
 | `outcome` | Final overall verdict: `PASS`, `FLAG` (needs manual review) or `FAIL` |
 | `summary` | One line, e.g. `FLAG: needs manual review; 2 rule(s) flagged (BIRTH-02, BIRTH-04)` |
 | `counts` | `{passed, flagged, failed}` |
-| `failures`, `flags` | The FAIL and FLAG rule results: `rule_id`, `outcome`, `reason`, `evidence` (document, field, value read, page) |
+| `failures`, `flags` | The FAIL and FLAG rule results: `rule_id`, `outcome`, `reason`, `evidence` (document, field, value read, page, and the OCR `confidence` 0..1 behind the value; below 0.90 a reading is not trusted and the rule FLAGs) |
 | `results` | Every rule result, PASS included |
 | `documents` | The extracted documents (passport, NIDs, ...) with every field's value, OCR confidence and page |
 | `pages` | How each uploaded page was classified (`kind`, `doc_id`, reason, source file and page) |

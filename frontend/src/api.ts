@@ -9,6 +9,8 @@ export interface Evidence {
   field: string
   value: string | null
   page: number | null
+  /** How sure the OCR was of the value (0..1); null for QR codes and online checks. */
+  confidence?: number | null
 }
 
 export interface RuleResult {

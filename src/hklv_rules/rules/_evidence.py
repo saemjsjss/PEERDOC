@@ -9,4 +9,5 @@ def ev(doc_id: str, field: str, value: Extracted) -> Evidence:
         field=field,
         value=None if value.value is None else str(value.value),
         page=value.source_page,
+        confidence=None if value.value is None else round(value.confidence, 4),
     )

@@ -43,3 +43,41 @@ describe('time', () => {
     expect(formatEta(null)).toBe('')
   })
 })
+
+import { fieldLabel, groupResults, problemsFirst, ruleTitle, sectionOf } from './rules'
+
+describe('rules', () => {
+  it('names fields readably', () => {
+    expect(fieldLabel('notary.notary_text_present')).toBe('notary text present')
+    expect(fieldLabel('notary.stamp_present')).toBe('notary stamp present')
+    expect(fieldLabel('number_on_card')).toBe('number on card')
+    expect(fieldLabel('members[2].name')).toBe('member 3 name')
+  })
+
+  it('knows every rule family and falls back to the id', () => {
+    expect(ruleTitle('BIRTH-04')).toBe('Registration number starts with the birth year')
+    expect(ruleTitle('NEW-99')).toBe('NEW-99')
+    expect(sectionOf('NID-ASSIGN')).toBe('identity')
+    expect(sectionOf('EMP-03')).toBe('income')
+    expect(sectionOf('NEW-99')).toBe('other')
+  })
+
+  it('groups by section in rulebook order and filters by outcome', () => {
+    const r = (rule_id: string, outcome: 'PASS' | 'FLAG' | 'FAIL') => ({ rule_id, outcome, reason: '', evidence: [] })
+    const results = [r('ACAD-01', 'PASS'), r('REQ-01', 'PASS'), r('BIRTH-04', 'FLAG'), r('REQ-02', 'FAIL')]
+    expect(groupResults(results, 'all').map((g) => g.section.id)).toEqual(['required', 'birth', 'academic'])
+    expect(groupResults(results, 'FLAG').map((g) => g.results.map((x) => x.rule_id))).toEqual([['BIRTH-04']])
+    expect(problemsFirst(results).map((x) => x.rule_id)).toEqual(['REQ-02', 'BIRTH-04', 'ACAD-01', 'REQ-01'])
+  })
+})
+
+import { formatConfidence } from './rules'
+
+describe('confidence', () => {
+  it('never rounds a low value up to the threshold', () => {
+    expect(formatConfidence(0.8996)).toBe('0.89')
+    expect(formatConfidence(0.6)).toBe('0.60')
+    expect(formatConfidence(0.99)).toBe('0.99')
+    expect(formatConfidence(1)).toBe('1.00')
+  })
+})

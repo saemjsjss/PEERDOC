@@ -8,7 +8,7 @@
   --color-surface: #f5f7fa;
   --color-brand: #1e3a5f;
   --color-brand-soft: #e8eef6;
-  --color-pass: #15803d;
+  --color-pass: #166534; /* 6.5:1 on pass-soft: AA for normal-size text */
   --color-pass-soft: #e7f6ec;
   --color-flag: #b45309;
   --color-flag-soft: #fdf3e2;
@@ -54,5 +54,22 @@ body {
   .progress-stripes,
   .animate-spin {
     animation: none;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  details > summary {
+    list-style: none;
+  }
+  /* Backstop: paper shows every <details> body, whatever was open on screen. */
+  details > :not(summary) {
+    display: block !important;
+  }
+  details::details-content {
+    content-visibility: visible !important;
+    display: block !important;
   }
 }

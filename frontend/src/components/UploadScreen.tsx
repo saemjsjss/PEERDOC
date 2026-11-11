@@ -91,7 +91,7 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
         onDrop={onDrop}
         className={[
           'flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-14 text-center transition-colors',
-          'focus:outline-none focus-visible:ring-4 focus-visible:ring-brand/25',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2',
           dragging ? 'border-brand bg-brand-soft' : 'border-line bg-white hover:border-brand/60 hover:bg-brand-soft/40',
         ].join(' ')}
       >
@@ -241,7 +241,7 @@ export function UploadScreen({ draft, onChange, onSubmit, error, ignored = [] }:
           type="button"
           onClick={submit}
           disabled={!files.length || tooBig}
-          className="rounded-xl bg-brand px-6 py-3 font-semibold text-white shadow-sm transition hover:bg-brand/90 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
+          className="rounded-xl bg-brand px-6 py-3 font-semibold text-white shadow-sm transition hover:bg-brand/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
         >
           Verify documents
         </button>
