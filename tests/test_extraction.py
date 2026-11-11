@@ -517,3 +517,34 @@ def test_seal_is_confirmed_by_its_own_ring_text(seal_text, reliable):
     seal = LayoutBlock(label="seal", text=seal_text, box=(line.box[0], line.box[3] + 20, line.box[0] + 300, line.box[3] + 320), score=0.82)
     page = base.model_copy(update={"blocks": (*base.blocks, seal)})
     assert notary_info([page]).stamp_present.is_reliable(0.9) is reliable
+
+
+# --- bank solvency holder ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        # 'Md' / 'Mst' are part of the name (MD X != X under the name policy): kept.
+        ("This is to certify that Md Kamal Uddin, Father's Name: Md. Abdul Karim", "Md Kamal Uddin"),
+        ("This is to certify that Md. Kamal Uddin, Son of Abdul Karim", "Md. Kamal Uddin"),
+        ("This is to certify that Mst. Rahima Begum, Wife of Abdul Karim", "Mst. Rahima Begum"),
+        # Courtesy titles are not: dropped.
+        ("This is to certify that Mr. Kamal Uddin, Son of Abdul Karim", "Kamal Uddin"),
+        ("This is to certify that Mrs Rahima Begum has been maintaining an account", "Rahima Begum"),
+    ],
+)
+def test_solvency_holder_keeps_md_and_mst_but_drops_courtesy_titles(sentence, expected):
+    from hklv_extract.extractors import bank_solvency
+    from hklv_extract.group import PageGroup
+
+    page = make_page(["SAMPLE BANK PLC", "SOLVENCY CERTIFICATE", sentence])
+    holder = bank_solvency(PageGroup(kind=PageKind.BANK_SOLVENCY, pages=[page]), "solvency-1").account_holder
+    assert holder.value == expected
+
+
+def test_solvency_holder_with_md_matches_the_father_spelled_md():
+    from hklv_rules.names import names_equal
+
+    assert names_equal("Md Kamal Uddin", "MD KAMAL UDDIN")
+    assert not names_equal("Kamal Uddin", "MD KAMAL UDDIN")  # why the prefix must not be stripped

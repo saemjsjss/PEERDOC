@@ -420,8 +420,13 @@ ACCOUNT_LABELS = [r"A/?C\.?\s*(?:No|Number)\.?", r"Account\s*(?:No|Number)\.?"]
 
 
 def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
-    """'This is to certify that ABDUL KARIM, Son of ...' -> ABDUL KARIM."""
-    rx = re.compile(r"certify\s+that\s+(?:Mr\.?|Mrs\.?|Ms\.?|Md\.?\s)?\s*([A-Za-z][A-Za-z .\-']{1,60}?)\s*(?:,|\bS/O\b|\bD/O\b|\bW/O\b|\bson\b|\bdaughter\b|\bwife\b|\bmaintain|\bhas\b|\bis\b)", re.IGNORECASE)
+    """'This is to certify that ABDUL KARIM, Son of ...' -> ABDUL KARIM.
+
+    Courtesy titles (Mr, Mrs, Ms) are dropped; 'Md' / 'Mst' are kept, because they are
+    part of the name: the name policy (hklv_rules.names) reads 'MD X' and 'X' as
+    different names, so 'Md Kamal Uddin' stripped to 'Kamal Uddin' would not match a
+    father recorded as 'MD KAMAL UDDIN'."""
+    rx = re.compile(r"certify\s+that\s+(?:(?:Mrs|Mr|Ms)\b\.?)?\s*([A-Za-z][A-Za-z .\-']{1,60}?)\s*(?:,|\bS/O\b|\bD/O\b|\bW/O\b|\bson\b|\bdaughter\b|\bwife\b|\bmaintain|\bhas\b|\bis\b)", re.IGNORECASE)
     for page in group.pages:
         lines = reading_order(page.lines)
         for i, ln in enumerate(lines):
