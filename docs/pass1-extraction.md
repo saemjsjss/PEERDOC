@@ -1,5 +1,28 @@
 # Pass 1: from scans to a `CaseFile`
 
+## Running the whole pipeline (folder in, verdict out)
+
+```powershell
+scripts\run_case.cmd "C:\dcSS\SAMPLE DOC" --date 2026-11-11
+```
+
+`run_case.cmd` starts `run_case.ps1` (bypassing the PowerShell script policy for that run),
+which hands over to WSL (`scripts/wsl/run_case.sh`), where `scripts/run_case.py` runs
+OCR → extraction → rules (`hklv_pipeline.run_case`) and prints the page map, the final
+verdict and every FAIL and FLAG reason.
+
+* Outputs go to `ocr_output/<folder name>/` (git-ignored): `reading.json` (saved the moment
+  OCR finishes), `case.json`, `verdict.json`. Old results there are removed first.
+* `--reading <reading.json>` re-judges a saved reading without OCR (seconds; works from the
+  Windows venv too). `--case-id`, `--out`, `--no-pages` are optional.
+* Exit code: 0 PASS, 1 FLAG, 2 FAIL, 3 error (bad arguments and crashes included, so a
+  wrapper never mistakes a crash for a verdict).
+* Relative and Windows paths work from wherever the command is run.
+
+First automated verdict on the sample set (2026-11-11): **FLAG**, 21 checks passed, the only
+flag being ENGINE-COVERAGE (rules not yet written). OCR took 40 minutes; a second full read
+gave the same 182 extracted values and confidences as the first.
+
 Pass 1 turns the uploaded files into the typed documents the rules engine checks. It runs
 in two halves so that the GPU part stays small and everything else is testable anywhere.
 
