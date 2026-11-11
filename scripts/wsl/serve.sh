@@ -17,5 +17,18 @@ mkdir -p "$HKLV_WORK_DIR" && chmod 700 "$HKLV_WORK_DIR"
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${LD_LIBRARY_PATH:-}"
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
+PORT="${HKLV_PORT:-8000}"
+# Already running (e.g. started in another window)? Say so instead of loading the models
+# for 20 s and then failing with "address already in use".
+if curl -s -m 2 "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q '"status":"ok"'; then
+    echo "The HKLV server is already running: open http://127.0.0.1:$PORT in your browser."
+    echo "(To restart it, press Ctrl+C in the window where it runs, then start it again.)"
+    exit 0
+fi
+if ss -ltn 2>/dev/null | grep -q "127.0.0.1:$PORT "; then
+    echo "Port $PORT is used by another program. Start on another port with HKLV_PORT, e.g.:"
+    echo "    HKLV_PORT=8010 bash $0"
+    exit 1
+fi
 exec "$OCR_HOME/.venv/bin/python" -m uvicorn hklv_api.app:app \
-    --app-dir "$SRC" --host 127.0.0.1 --port "${HKLV_PORT:-8000}" --workers 1
+    --app-dir "$SRC" --host 127.0.0.1 --port "$PORT" --workers 1
