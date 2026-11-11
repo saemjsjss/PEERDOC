@@ -20,7 +20,9 @@ from __future__ import annotations
 import asyncio
 import gc
 import os
+import threading
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,16 +44,34 @@ def _box(values) -> Box:
     return (x0, y0, x1, y1)
 
 
+# PDFium is not thread-safe, even across documents. Every pypdfium2 call goes through this
+# lock, so concurrent requests (each in its own worker thread) can't crash the process.
+_PDFIUM = threading.Lock()
+
+
 def page_count(path: Path) -> int:
     if path.suffix.lower() != ".pdf":
         return 1
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(str(path))
-    try:
-        return len(pdf)
-    finally:
-        pdf.close()
+    with _PDFIUM:
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            return len(pdf)
+        finally:
+            pdf.close()
+
+
+def check_readable(path: Path) -> None:
+    """Raise if the readers can't open this file (empty, truncated, not really a PDF/image)."""
+    if path.suffix.lower() == ".pdf":
+        if page_count(path) < 1:
+            raise ValueError("PDF has no pages")
+        return
+    from PIL import Image
+
+    with Image.open(path) as img:
+        img.verify()
 
 
 def render_page(path: Path, index: int, dpi: int = RENDER_DPI):
@@ -63,18 +83,19 @@ def render_page(path: Path, index: int, dpi: int = RENDER_DPI):
             return img.convert("RGB")
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(str(path))
-    try:
-        page = pdf[index]
+    with _PDFIUM:
+        pdf = pdfium.PdfDocument(str(path))
         try:
-            bitmap = page.render(scale=dpi / 72)
-            image = bitmap.to_pil().convert("RGB")
-            bitmap.close()
-            return image
+            page = pdf[index]
+            try:
+                bitmap = page.render(scale=dpi / 72)
+                image = bitmap.to_pil().convert("RGB")
+                bitmap.close()
+                return image
+            finally:
+                page.close()
         finally:
-            page.close()
-    finally:
-        pdf.close()
+            pdf.close()
 
 
 def _system_memory_mb() -> tuple[int | None, int | None]:
@@ -154,7 +175,10 @@ class PageReader:
         self._clear_each_page = self._on_gpu and os.environ.get("HKLV_KEEP_GPU_CACHE") != "1"
         self._gpu = asyncio.Lock()
         self.progress = progress
-        self.stats: list[PageStat] = []
+        # Recent pages only: a long-running server must not keep every upload's file name.
+        self.stats: deque[PageStat] = deque(maxlen=200)
+
+    check_readable = staticmethod(check_readable)
 
     @staticmethod
     def versions() -> dict[str, str]:

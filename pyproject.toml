@@ -1,12 +1,14 @@
 [project]
 name = "hklv-rules"
 version = "0.1.0"
-description = "HKLV document verification: Pass 1 extraction, Pass 2 anchors, Pass 3 Rulebook v2.5 rules engine"
+description = "HKLV document verification: OCR extraction, Rulebook v2.5 rules engine, online checks and API"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.7,<3"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
+# FastAPI backend (run the server in the WSL OCR environment: scripts/wsl/serve.sh)
+api = ["fastapi>=0.115", "python-multipart>=0.0.9", "uvicorn>=0.30"]
 
 [build-system]
 requires = ["setuptools>=69"]

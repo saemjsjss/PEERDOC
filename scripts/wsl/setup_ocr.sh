@@ -16,6 +16,7 @@ PADDLE_VERSION="3.2.1"
 PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu129/"
 PADDLEOCR_SPEC="paddleocr[doc-parser]>=3.6.0"
 ZXING_SPEC="zxing-cpp>=3.1"
+API_SPECS=("fastapi>=0.115" "python-multipart>=0.0.9" "uvicorn>=0.30")
 
 step() { printf '\n==> %s\n' "$*"; }
 
@@ -80,6 +81,9 @@ python -m pip install -U "$PADDLEOCR_SPEC"
 
 step "Installing ZXing-C++ (QR codes and barcodes)"
 python -m pip install -U "$ZXING_SPEC"
+
+step "Installing the API server (FastAPI, Uvicorn)"
+python -m pip install -U "${API_SPECS[@]}"
 
 step "Checking PaddlePaddle can use the GPU"
 python - <<'EOF'

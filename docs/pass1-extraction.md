@@ -2,6 +2,8 @@
 
 ## Running the whole pipeline (folder in, verdict out)
 
+For the HTTP API (`POST /verify` with files or a ZIP), see [api.md](api.md).
+
 ```powershell
 scripts\run_case.cmd "C:\dcSS\SAMPLE DOC" --date 2026-11-11
 ```
