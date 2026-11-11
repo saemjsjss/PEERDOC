@@ -1,5 +1,7 @@
 """Rulebook v2.5 section 3: required documents (REQ-01 .. REQ-10).
 
+REQ-10: Income Tax, the Student NID and IELTS/TOPIK are optional; absent is PASS.
+
 REQ-06 accepts a Trade License OR an Employment Certificate. REQ-08 / REQ-09 accept a
 parent's NID OR that parent's Death Certificate; both are matched to the parent by name
 (NID-ASSIGN, DEATH-01), so an NID that belongs to someone else does not count.
@@ -17,6 +19,7 @@ from ..models import (
     IncomeTaxAcknowledgement,
     IncomeTaxCertificate,
     IncomeTaxChallan,
+    LanguageTest,
     Outcome,
     Passport,
     Person,
@@ -93,8 +96,10 @@ def _parent_identity(rule_id: str, parent: Person, nids: Assignment, deaths: Ass
 def _optional(ctx: EvaluationContext, nids: Assignment) -> RuleResult:
     tax = _has(ctx, IncomeTaxChallan, IncomeTaxAcknowledgement, IncomeTaxCertificate)
     student_nid = bool(nids.doc_ids_for(Person.STUDENT))
+    language = _has(ctx, LanguageTest)
     notes = [
         f"Income Tax {'present' if tax else 'not submitted'}",
         f"Student NID {'present' if student_nid else 'not submitted'}",
+        f"IELTS/TOPIK {'present' if language else 'not submitted'}",
     ]
     return RuleResult(rule_id="REQ-10", outcome=Outcome.PASS, reason="Optional documents: " + "; ".join(notes))

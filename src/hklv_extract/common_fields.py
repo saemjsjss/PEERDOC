@@ -12,6 +12,7 @@ from .confidence import AGREE_CAP, SINGLE_READER_FACTOR
 from .text import bangla_ratio
 
 NOTARY_RE = re.compile(r"\bNOTARY\s*PUBLIC\b|\bADVOCATE\b", re.IGNORECASE)
+SEAL_NOTARY_STEM_RE = re.compile(r"\b(?:N[O0]TAR|ADV[O0]CAT)", re.IGNORECASE)
 TRANSLATION_RE = re.compile(r"\bTRANSLAT(?:ED|ION)\b|\bTRUE\s+TRANSLATION\b|\bENGLISH\s+VERSION\b", re.IGNORECASE)
 
 # Seal detection has no calibrated score yet. A detected seal block with no layout score,
@@ -54,16 +55,31 @@ def _gap(a: Box, b: Box) -> int:
     return max(dx, dy)
 
 
+def _seal_says_notary(text: str) -> bool:
+    """The stamp's own ring text names a notary/advocate. Tolerates the misreads seen on
+    real stamps ("NOTARY PULIC", "NOTARYY", "MOEASSIR"): only the stems must survive.
+    The stem must start a word: squashing spaces would turn "REG NO TAREK" into
+    "REGNOTAREK" and wrongly match."""
+    return bool(SEAL_NOTARY_STEM_RE.search(text.upper()))
+
+
 def _seal_confidence(page: PageReading, seal: LayoutBlock) -> float:
-    """A seal next to "Notary Public"/"Advocate" text is that attestation's stamp.
+    """Is this seal-shaped mark a notary's stamp?
 
     The layout detector scores seals 0.5-0.95 even when they are plainly there (stamps
-    overprint text). Two independent signals in the same spot, a seal-shaped mark and
-    the notary's own wording, confirm each other; a seal elsewhere keeps its own score.
+    overprint text, and copies fade). So a second, independent signal decides:
+
+    1. The seal's own text (PaddleOCR-VL seal recognition reads the curved ring text):
+       notary/advocate wording -> confirmed. Any other text (a government emblem, a
+       company seal, or garbage) -> the detector's score only, whatever is nearby.
+    2. No text read from the seal: "Notary Public"/"Advocate" printed right next to it
+       confirms it (the attestation block the stamp sits on).
     """
     own = seal.score if seal.score is not None else SEAL_UNSCORED
     if own < SEAL_MIN_SCORE:
         return own
+    if seal.text.strip():
+        return max(own, SEAL_WITH_NOTARY_TEXT) if _seal_says_notary(seal.text) else own
     near_text = [ln for ln in page.lines if NOTARY_RE.search(ln.text) and _gap(ln.box, seal.box) <= SEAL_NEAR_PX]
     if near_text:
         return max(own, min(max(ln.score for ln in near_text), SEAL_WITH_NOTARY_TEXT))

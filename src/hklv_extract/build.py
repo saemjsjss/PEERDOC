@@ -40,7 +40,7 @@ def build_case(reading: CaseReading, case_id: str, evaluation_date: date) -> tup
     doc_of_page: dict[int, str] = {}
     for g in groups:
         extractor = EXTRACTORS.get(g.kind)
-        if extractor is None:  # recognised but not used by the rules (e.g. IELTS for now)
+        if extractor is None:  # a recognised kind with no extractor yet
             continue
         counter[g.kind] += 1
         doc_id = f"{g.kind.value}-{counter[g.kind]}"

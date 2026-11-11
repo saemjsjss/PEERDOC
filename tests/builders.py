@@ -1,9 +1,12 @@
 """Test data builders. All people here are fictional.
 
 Default family:
-    Student  TANVIR AHMED     (passport printed + MRZ)
+    Student  TANVIR AHMED     (passport printed + MRZ), born 15 March 2001
     Father   MD. KAMAL UDDIN  (birth certificate)
     Mother   RINA BEGUM       (birth certificate)
+
+Every default document is complete and valid on EVAL_DATE, so `complete_case_documents()`
+passes every rule; tests change one thing at a time.
 """
 
 from __future__ import annotations
@@ -12,6 +15,9 @@ from datetime import date
 
 from hklv_rules.context import EvaluationContext
 from hklv_rules.models import (
+    AcademicCertificate,
+    AcademicLevel,
+    AcademicTranscript,
     Affidavit,
     AffidavitEntry,
     BankSolvency,
@@ -19,6 +25,7 @@ from hklv_rules.models import (
     BirthCertificate,
     CaseFile,
     DeathCertificate,
+    EApostille,
     EmploymentCertificate,
     Extracted,
     FamilyRelationshipCertificate,
@@ -27,6 +34,8 @@ from hklv_rules.models import (
     NidVariant,
     NotaryInfo,
     Language,
+    OnlineCheck,
+    OnlineStatus,
     Passport,
     Person,
     Photo,
@@ -39,6 +48,15 @@ STUDENT = "TANVIR AHMED"
 FATHER = "MD. KAMAL UDDIN"
 MOTHER = "RINA BEGUM"
 HIGH, LOW = 0.99, 0.40
+_DEFAULT = object()
+STUDENT_DOB = date(2001, 3, 15)
+STUDENT_BRN = "20012691234567890"  # starts with the birth year (BIRTH-04)
+PASSPORT_EXPIRY = date(2031, 1, 1)
+NID_NUMBER = "5551234567"
+TIN_NUMBER = "123456789012"
+ACCOUNT_NUMBER = "0123456789"
+BANK_DATE = date(2026, 10, 20)
+APOSTILLE_URL = "https://apostille.mygov.bd/application-details/100000000001"
 
 
 def ex(value, confidence: float = HIGH, page: int = 1) -> Extracted:
@@ -49,6 +67,10 @@ def notarised(text: bool = True, stamp: bool = True, confidence: float = HIGH) -
     return NotaryInfo(notary_text_present=ex(text, confidence), stamp_present=ex(stamp, confidence))
 
 
+def _opt(value, confidence: float = HIGH) -> Extracted:
+    return ex(value, confidence) if value is not None else Extracted()
+
+
 def passport(
     given: str = "TANVIR",
     surname: str = "AHMED",
@@ -56,37 +78,204 @@ def passport(
     mrz_surname: str | None = None,
     father: str | None = None,
     mother: str | None = None,
+    dob: date | None = STUDENT_DOB,
+    expiry: date | None = PASSPORT_EXPIRY,
+    date_confidence: float = HIGH,
+    doc_id: str = "passport",
+    printed_expiry=_DEFAULT,
 ) -> Passport:
+    """`printed_expiry`: the printed 'Date of Expiry' (default: same as the MRZ `expiry`)."""
+    printed = expiry if printed_expiry is _DEFAULT else printed_expiry
     return Passport(
-        doc_id="passport",
+        doc_id=doc_id,
+        passport_number=ex("K12345678"),
         given_names=ex(given),
         surname=ex(surname),
         mrz_given_names=ex(mrz_given if mrz_given is not None else given),
         mrz_surname=ex(mrz_surname if mrz_surname is not None else surname),
+        date_of_birth=_opt(dob, date_confidence),
+        date_of_expiry=_opt(expiry, date_confidence),
+        printed_date_of_expiry=_opt(printed, date_confidence),
         father_name=ex(father) if father else Extracted[str](),
         mother_name=ex(mother) if mother else Extracted[str](),
     )
 
 
-def birth_certificate(father: str = FATHER, mother: str = MOTHER, confidence: float = HIGH) -> BirthCertificate:
+def birth_certificate(
+    father: str = FATHER,
+    mother: str = MOTHER,
+    confidence: float = HIGH,
+    dob: date | None = STUDENT_DOB,
+    brn: str | None = STUDENT_BRN,
+    language: Language = Language.ENGLISH,
+    translated: bool | None = None,
+    notary=_DEFAULT,
+    field_confidence: float = HIGH,
+    doc_id: str = "birth",
+) -> BirthCertificate:
     return BirthCertificate(
-        doc_id="birth",
+        doc_id=doc_id,
+        registration_number=_opt(brn, field_confidence),
         name=ex(STUDENT),
+        date_of_birth=_opt(dob, field_confidence),
         father_name=ex(father, confidence),
         mother_name=ex(mother, confidence),
+        language=ex(language),
+        has_english_translation=_opt(translated),
+        notary=notarised() if notary is _DEFAULT else notary,
     )
 
 
-def tin(name: str, confidence: float = HIGH, doc_id: str = "tin") -> TinCertificate:
-    return TinCertificate(doc_id=doc_id, taxpayer_name=ex(name, confidence))
+def tin(
+    name: str,
+    confidence: float = HIGH,
+    doc_id: str = "tin",
+    printed: str | None = TIN_NUMBER,
+    qr: str | None = TIN_NUMBER,
+    qr_decoded: bool | None = None,
+) -> TinCertificate:
+    return TinCertificate(
+        doc_id=doc_id,
+        taxpayer_name=ex(name, confidence),
+        tin_printed=_opt(printed),
+        qr_decoded=(qr is not None) if qr_decoded is None else qr_decoded,
+        tin_from_qr=qr,
+    )
 
 
-def trade(name: str, confidence: float = HIGH, doc_id: str = "trade") -> TradeLicense:
-    return TradeLicense(doc_id=doc_id, owner_name=ex(name, confidence))
+def trade(
+    name: str,
+    confidence: float = HIGH,
+    doc_id: str = "trade",
+    fiscal_year: str | None = "2026-2027",
+    language: Language = Language.ENGLISH,
+    translated: bool | None = None,
+    notary=_DEFAULT,
+) -> TradeLicense:
+    return TradeLicense(
+        doc_id=doc_id,
+        license_number=ex("TRAD/DNCC/012345/2026"),
+        owner_name=ex(name, confidence),
+        fiscal_year=_opt(fiscal_year),
+        language=ex(language),
+        has_english_translation=_opt(translated),
+        notary=notarised() if notary is _DEFAULT else notary,
+    )
 
 
-def nid(doc_id: str, name: str, confidence: float = HIGH, variant: NidVariant = NidVariant.DIGITAL) -> NationalId:
-    return NationalId(doc_id=doc_id, variant=variant, cardholder_name=ex(name, confidence))
+def nid(
+    doc_id: str,
+    name: str,
+    confidence: float = HIGH,
+    variant: NidVariant = NidVariant.DIGITAL,
+    number: str | None = NID_NUMBER,
+    translation_number: str | None = None,
+    translated: bool | None = True,
+    notary=_DEFAULT,
+    number_confidence: float = HIGH,
+) -> NationalId:
+    """Defaults: card and translation numbers match, translated, notarised."""
+    return NationalId(
+        doc_id=doc_id,
+        variant=variant,
+        cardholder_name=ex(name, confidence),
+        number_on_card=_opt(number, number_confidence),
+        number_on_translation=_opt(translation_number if translation_number is not None else number, number_confidence),
+        has_english_translation=_opt(translated),
+        notary=notarised() if notary is _DEFAULT else notary,
+    )
+
+
+def bank_solvency(
+    holder: str = FATHER,
+    account: str | None = ACCOUNT_NUMBER,
+    letter_date: date | None = BANK_DATE,
+    confidence: float = HIGH,
+    doc_id: str = "solvency",
+) -> BankSolvency:
+    return BankSolvency(
+        doc_id=doc_id,
+        account_holder=ex(holder, confidence),
+        account_number=_opt(account, confidence),
+        letter_date=_opt(letter_date, confidence),
+    )
+
+
+def bank_statement(
+    holder: str = FATHER,
+    account: str | None = ACCOUNT_NUMBER,
+    statement_date: date | None = BANK_DATE,
+    confidence: float = HIGH,
+    doc_id: str = "statement",
+) -> BankStatement:
+    return BankStatement(
+        doc_id=doc_id,
+        account_holder=ex(holder, confidence),
+        account_number=_opt(account, confidence),
+        statement_date=_opt(statement_date, confidence),
+    )
+
+
+def apostille(
+    doc_id: str = "apostille-1",
+    page: int = 20,
+    url: str | None = APOSTILLE_URL,
+    online: OnlineStatus | None = OnlineStatus.VERIFIED,
+) -> EApostille:
+    return EApostille(
+        doc_id=doc_id,
+        pages=(page,),
+        qr_decoded=url is not None,
+        qr_url=url,
+        online=OnlineCheck(status=online) if online is not None else None,
+    )
+
+
+def academic_certificate(
+    level: AcademicLevel = AcademicLevel.SSC,
+    name: str = STUDENT,
+    dob: date | None = STUDENT_DOB,
+    page: int = 21,
+    doc_id: str | None = None,
+    confidence: float = HIGH,
+) -> AcademicCertificate:
+    return AcademicCertificate(
+        doc_id=doc_id or f"cert-{level.value.lower()}",
+        pages=(page,),
+        level=ex(level, confidence),
+        student_name=ex(name, confidence),
+        date_of_birth=_opt(dob, confidence),
+    )
+
+
+def academic_transcript(
+    level: AcademicLevel = AcademicLevel.SSC,
+    name: str = STUDENT,
+    page: int = 23,
+    doc_id: str | None = None,
+    confidence: float = HIGH,
+) -> AcademicTranscript:
+    return AcademicTranscript(
+        doc_id=doc_id or f"transcript-{level.value.lower()}",
+        pages=(page,),
+        level=ex(level, confidence),
+        student_name=ex(name, confidence),
+    )
+
+
+def academic_set(first_page: int = 20, levels=(AcademicLevel.SSC, AcademicLevel.HSC)) -> list:
+    """Each certificate and transcript preceded by its own verified e-Apostille page:
+    apostille, SSC certificate, apostille, SSC transcript, apostille, HSC certificate, ...
+    Only SSC/Dakhil certificates carry a date of birth (ACAD-04 checks those)."""
+    docs, page = [], first_page
+    for level in levels:
+        docs.append(apostille(doc_id=f"apostille-{page}", page=page))
+        has_dob = level in (AcademicLevel.SSC, AcademicLevel.DAKHIL)
+        docs.append(academic_certificate(level, page=page + 1, dob=STUDENT_DOB if has_dob else None))
+        docs.append(apostille(doc_id=f"apostille-{page + 2}", page=page + 2))
+        docs.append(academic_transcript(level, page=page + 3))
+        page += 4
+    return docs
 
 
 def affidavit(
@@ -118,7 +307,6 @@ def default_members() -> tuple[FrcMember, ...]:
     )
 
 
-_DEFAULT = object()
 
 
 def frc(
@@ -200,16 +388,18 @@ def death(
 
 
 def complete_case_documents() -> list:
-    """A full, valid fictional submission (everything section 3 requires)."""
+    """A full, valid fictional submission (section 3 requirements plus SSC + HSC academics).
+    Combined with the default passport and birth certificate it passes every rule."""
     return [
         Photo(doc_id="photo"),
         frc(),
-        BankSolvency(doc_id="solvency", account_holder=ex(FATHER), account_number=ex("0123456789")),
-        BankStatement(doc_id="statement", account_holder=ex(FATHER), account_number=ex("0123456789")),
+        bank_solvency(),
+        bank_statement(),
         trade(FATHER),
         tin(FATHER),
-        nid("n-father", FATHER),
-        nid("n-mother", MOTHER),
+        nid("n-father", FATHER, number="4441234567"),
+        nid("n-mother", MOTHER, number="6661234567"),
+        *academic_set(),
     ]
 
 

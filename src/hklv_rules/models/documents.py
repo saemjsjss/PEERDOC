@@ -36,6 +36,24 @@ def _lang() -> Extracted[Language]:
     return Extracted[Language]()
 
 
+class OnlineStatus(str, Enum):
+    """Result of checking a document against an official website."""
+
+    VERIFIED = "VERIFIED"  # the site confirms the record
+    NOT_FOUND = "NOT_FOUND"  # the site says there is no such record
+    UNAVAILABLE = "UNAVAILABLE"  # the check was attempted but the site/internet failed
+    NOT_RUN = "NOT_RUN"  # online checks were not enabled for this run
+
+
+class OnlineCheck(Frozen):
+    """What an online verification step found. Filled in outside the rules engine (which
+    never does I/O); the rules only interpret it."""
+
+    status: OnlineStatus
+    detail: str = ""
+    amount: Decimal | None = Field(default=None, description="Amount the website shows (challan)")
+
+
 class DocumentBase(Frozen):
     doc_id: str = Field(min_length=1)
     pages: tuple[int, ...] = Field(default=(), description="1-based page numbers in the upload")
@@ -53,6 +71,14 @@ class Passport(DocumentBase):
     mrz_given_names: Extracted[str] = Field(default_factory=_str)
     date_of_birth: Extracted[date] = Field(default_factory=_date)
     date_of_expiry: Extracted[date] = Field(default_factory=_date)
+    printed_date_of_expiry: Extracted[date] = Field(
+        default_factory=_date,
+        description=(
+            "Expiry as printed on the data page ('Date of Expiry'), read even when an MRZ exists. "
+            "date_of_expiry holds the check-digit-verified MRZ value when there is an MRZ; "
+            "PASSPORT-01 compares the two (rulebook 4.1: MRZ and print mismatch -> FLAG)."
+        ),
+    )
     father_name: Extracted[str] = Field(default_factory=_str)
     mother_name: Extracted[str] = Field(default_factory=_str)
 
@@ -195,6 +221,7 @@ class IncomeTaxChallan(DocumentBase):
     kind: Literal["tax_challan"] = "tax_challan"
     challan_number: Extracted[str] = Field(default_factory=_str)
     printed_amount: Extracted[Decimal] = Field(default_factory=_money)
+    online: OnlineCheck | None = Field(default=None, description="challanverification.finance.gov.bd result")
 
 
 class IncomeTaxAcknowledgement(DocumentBase):
@@ -226,6 +253,7 @@ class EApostille(DocumentBase):
     kind: Literal["e_apostille"] = "e_apostille"
     qr_decoded: bool = False
     qr_url: str | None = None
+    online: OnlineCheck | None = Field(default=None, description="Result of opening the QR link")
 
 
 class AcademicCertificate(DocumentBase):
@@ -239,3 +267,21 @@ class AcademicTranscript(DocumentBase):
     kind: Literal["academic_transcript"] = "academic_transcript"
     level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
     student_name: Extracted[str] = Field(default_factory=_str)
+
+
+# --- Language test (optional) ---------------------------------------------------
+
+
+class LanguageTestKind(str, Enum):
+    IELTS = "IELTS"
+    TOPIK = "TOPIK"
+
+
+class LanguageTest(DocumentBase):
+    """IELTS Test Report Form or TOPIK certificate (section 4.10; optional document)."""
+
+    kind: Literal["language_test"] = "language_test"
+    test: Extracted[LanguageTestKind] = Field(default_factory=Extracted[LanguageTestKind])
+    candidate_name: Extracted[str] = Field(default_factory=_str)
+    date_of_birth: Extracted[date] = Field(default_factory=_date)
+    test_date: Extracted[date] = Field(default_factory=_date, description="Test date (IELTS) / issue date (TOPIK)")

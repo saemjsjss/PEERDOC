@@ -15,6 +15,10 @@ verdict and every FAIL and FLAG reason.
   OCR finishes), `case.json`, `verdict.json`. Old results there are removed first.
 * `--reading <reading.json>` re-judges a saved reading without OCR (seconds; works from the
   Windows venv too). `--case-id`, `--out`, `--no-pages` are optional.
+* Online checks run by default after extraction: each e-Apostille's application number is
+  looked up on apostille.mygov.bd and each automated challan on the Finance Division's
+  A-challan system (see `docs/rulebook-supplement-draft.md`, "Online checks"). `--offline`
+  turns them off; ACAD-01 / TAX-04 then FLAG as "not verified online".
 * Exit code: 0 PASS, 1 FLAG, 2 FAIL, 3 error (bad arguments and crashes included, so a
   wrapper never mistakes a crash for a verdict).
 * Relative and Windows paths work from wherever the command is run.
@@ -122,8 +126,10 @@ say-so:
 | PaddleOCR-VL has a near-miss of the value (1 letter per 5 different) | **0.50**: the readers disagree, so FLAG |
 | PaddleOCR-VL has nothing like it | line score × 0.92 (passes alone only if the line score is ≥ ~0.98) |
 | Printed name matches the MRZ name (word order ignored) | 0.99 |
-| Seal block (layout score ≥ 0.5) within ~3.4 cm of "Notary Public"/"Advocate" text | 0.95 (two independent signals in one spot) |
-| Seal block elsewhere | the layout detector's own score (seen: 0.48–0.94), so usually FLAG |
+| Seal block whose own ring text (PaddleOCR-VL seal recognition) has a word starting "NOTAR"/"ADVOCAT" | 0.95 (seal shape + the notary's name on it) |
+| Seal block whose ring text says something else (Union Parishad, university, consular seal, emblem) | the layout detector's own score, never boosted |
+| Seal block with no readable text, within ~3.4 cm of "Notary Public"/"Advocate" text | 0.95 |
+| Any other seal block | the layout detector's own score (seen: 0.48–0.94), so usually FLAG |
 | No seal block found | `stamp_present = False` at 0.50, so FLAG, not FAIL: the layout model misses some embossed seals |
 
 MRZ text is repaired only where a check digit guards the repair (O→0, I→1 ... in numeric

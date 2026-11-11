@@ -21,6 +21,65 @@ def subtract_months(d: date, months: int) -> date:
     return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
 
 
+def add_months(d: date, months: int) -> date:
+    """Same day `months` later, clamped to the month's last day (31 Jan + 1 = 28/29 Feb)."""
+    return subtract_months(d, -months)
+
+
+def digits(text: str | None) -> str:
+    return "".join(ch for ch in (text or "") if ch.isdigit())
+
+
+def digit_difference(a: str, b: str) -> int:
+    """How many digits differ between two numbers, on the digits only.
+
+    Same length: the number of positions whose digits differ (a completely different
+    number of the same length differs in every position, not by a couple of edits).
+    Different lengths: edit distance, so a dropped or extra digit counts as one
+    difference, not as every later digit shifting."""
+    a, b = digits(a), digits(b)
+    if len(a) == len(b):
+        return sum(ca != cb for ca, cb in zip(a, b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def number_match_rule(
+    rule_id: str,
+    doc_id: str,
+    what: str,
+    first: tuple[str, Extracted[str]],
+    second: tuple[str, Extracted[str]],
+    ctx: EvaluationContext,
+) -> RuleResult:
+    """Two readings of one number (NID-03, TIN-02): exact -> PASS, 1-2 digits differ -> FLAG,
+    3+ differ -> FAIL. Either number missing or unreliable -> FLAG."""
+    (name_a, a), (name_b, b) = first, second
+    evidence = (ev(doc_id, name_a, a), ev(doc_id, name_b, b))
+
+    def result(outcome: Outcome, reason: str) -> RuleResult:
+        return RuleResult(rule_id=rule_id, outcome=outcome, reason=reason, evidence=evidence)
+
+    missing = [label for label, x in ((name_a, a), (name_b, b)) if not (x.found and digits(x.value))]
+    if missing:
+        return result(Outcome.FLAG, f"{what}: {' and '.join(missing)} not found, so the numbers can't be compared")
+    shaky = [label for label, x in ((name_a, a), (name_b, b)) if not x.is_reliable(ctx.threshold)]
+    if shaky:
+        return result(Outcome.FLAG, f"{what}: {' and '.join(shaky)} read with low OCR confidence")
+    diff = digit_difference(a.value, b.value)
+    if diff == 0:
+        return result(Outcome.PASS, f"{what}: {name_a} and {name_b} match ({digits(a.value)})")
+    detail = f"{name_a} {digits(a.value)} vs {name_b} {digits(b.value)}"
+    if diff <= 2:
+        return result(Outcome.FLAG, f"{what}: {diff} digit(s) differ ({detail})")
+    return result(Outcome.FAIL, f"{what}: {diff} digits differ ({detail})")
+
+
 def notary_rule(rule_id: str, doc_id: str, notary: NotaryInfo | None, ctx: EvaluationContext) -> RuleResult:
     """Notary Public/Advocate text AND a stamp: both seen -> PASS, either absent -> FAIL, unreadable -> FLAG."""
 
@@ -50,7 +109,12 @@ def translation_rule(
     has_translation: Extracted[bool],
     ctx: EvaluationContext,
 ) -> RuleResult:
-    """A Bangla (or mixed) document needs an English translation page."""
+    """Rulebook: "If Bangla, must have English translation".
+
+    FAIL only when the document is reliably BANGLA and reliably has no translation page.
+    MIXED (partly Bangla, e.g. a bilingual certificate that also carries the English text)
+    without a separate translation is a FLAG: a person confirms the English is complete.
+    """
     evidence = (ev(doc_id, "language", language), ev(doc_id, "has_english_translation", has_translation))
 
     def result(outcome: Outcome, reason: str) -> RuleResult:
@@ -64,6 +128,12 @@ def translation_rule(
         return result(Outcome.PASS, "Document is in English; no translation needed")
     if lang is None:
         return result(Outcome.FLAG, "Document language could not be determined and no English translation was confirmed")
+    if translated is False and lang is Language.MIXED:
+        return result(
+            Outcome.FLAG,
+            "Document is partly in Bangla with no separate English translation page; "
+            "confirm the English text is complete",
+        )
     if translated is False:
         return result(Outcome.FAIL, f"Document is in {lang.value.title()} and has no English translation")
     return result(Outcome.FLAG, f"Document is in {lang.value.title()}; English translation could not be confirmed")
@@ -141,7 +211,8 @@ def assign_by_name(
 
     PASS when it matches exactly one allowed person. FAIL when it matches someone who is
     not allowed (e.g. the student on a parent-only document) or matches nobody. FLAG when
-    unreadable or ambiguous. Two documents for the same person FLAG.
+    unreadable or ambiguous, or when it matches nobody but an allowed person's anchor was
+    not established (it may be theirs). Two documents for the same person FLAG.
     """
     assigned: dict[Person, list[str]] = {p: [] for p in Person}
     possible: dict[Person, list[str]] = {p: [] for p in Person}
@@ -174,7 +245,20 @@ def assign_by_name(
                 f"{compare_name(name, outsider, ctx).reason}",
             )
         elif ident.status is IdStatus.UNKNOWN:
-            outcome, reason = Outcome.FAIL, f"{label} {doc_id} {unknown_reason}: {ident.reason}"
+            # A person whose anchor was never established (e.g. the father's name was not
+            # read on the Birth Certificate) can't be ruled out: missing reference data is
+            # a FLAG, not a FAIL. FAIL only when every allowed anchor is established.
+            unanchored = [p for p in allowed if ctx.anchors.for_person(p).name is None]
+            if unanchored:
+                for p in unanchored:
+                    possible[p].append(doc_id)
+                missing = "; ".join(ctx.anchors.for_person(p).describe() for p in unanchored)
+                outcome, reason = (
+                    Outcome.FLAG,
+                    f"{label} {doc_id} could not be assigned with certainty: {missing}",
+                )
+            else:
+                outcome, reason = Outcome.FAIL, f"{label} {doc_id} {unknown_reason}: {ident.reason}"
         else:  # AMBIGUOUS or UNCERTAIN among the allowed people
             for p in allowed:
                 if compare_name(name, p, ctx).kind is not MatchKind.MISMATCH:

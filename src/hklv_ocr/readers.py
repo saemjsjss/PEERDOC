@@ -141,7 +141,9 @@ class PageReader:
             use_textline_orientation=False,
             device=device,
         )
-        self._vl_model = PaddleOCRVL(pipeline_version="v1.6", device=device)
+        # Seal recognition reads a stamp's curved ring text ("ADVOCATE ... NOTARY PUBLIC"),
+        # which the line reader cannot; it is what confirms a stamp is a notary's.
+        self._vl_model = PaddleOCRVL(pipeline_version="v1.6", device=device, use_seal_recognition=True)
         if device.startswith("gpu"):
             # Model loading leaves ~4 GB of temporary buffers reserved; on an 8 GB card that
             # pushes generation into shared system memory. Hand it back before inference.

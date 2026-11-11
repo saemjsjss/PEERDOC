@@ -23,6 +23,7 @@ from .documents import (
     IncomeTaxAcknowledgement,
     IncomeTaxCertificate,
     IncomeTaxChallan,
+    LanguageTest,
     NationalId,
     Passport,
     Photo,
@@ -50,6 +51,7 @@ Document = Annotated[
         EApostille,
         AcademicCertificate,
         AcademicTranscript,
+        LanguageTest,
     ],
     Field(discriminator="kind"),
 ]

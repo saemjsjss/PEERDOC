@@ -56,3 +56,104 @@ Not used by the rules engine yet; proposed for the OCR pass:
 
 Unreadable or low-confidence values -> FLAG, never a guess. Name matching is exact after
 cleanup; a notarised same-person affidavit bridges spelling differences (5.2).
+
+## Interpretations made while implementing sections 4.1-4.10 (need approval)
+
+Where the rulebook text leaves a case open, the engine does the following. Each line is
+one decision; change any of them and the matching rule changes.
+
+**Approved by the project owner on 2026-11-11:** ACAD-02 (pairs per level), ACAD-03
+(unlisted combinations FLAG) and TIN-03 (Employment Certificate when there is no Trade
+License). BIRTH-02 stays FLAG when the layout model misses a red foil seal; colour-based
+seal detection is deferred to a later update. The other lines below still await review.
+
+**4.1 Passport.** PASSPORT-01: expiry exactly 12 months after the evaluation date passes.
+"MRZ and Print mismatch" covers both the name (word order and spacing ignored) and the
+expiry date: a reliably read printed expiry that differs from the MRZ expiry is FLAG. The
+expiry checked against the evaluation date is the MRZ one (check-digit verified); a printed
+expiry that could not be read reliably adds no finding. A low-confidence MRZ expiry is FLAG
+even if it looks long past.
+
+**4.2 NID.** NID-01 needs a translation page even when the card itself shows English. A
+translation page is recognised by its own wording ("translated", "translation", "true copy",
+"authorized to translate"); notary text alone does not make a notarised photocopy of the
+card its own translation. NID rules run on every NID, including one NID-ASSIGN could not
+assign. NID-03 / TIN-02 count differing positions when both numbers have the same length,
+and edit distance only when a digit was dropped or added.
+
+**4.3 Birth (and every "If Bangla, must have English translation" rule).** BIRTH-03: a
+different year FAILs even across New Year (31-12 vs 01-01). BIRTH-04 never FAILs: a BRN not
+starting with the birth year (e.g. old 13/16-digit format) is FLAG. BIRTH-01 / TRADE-01 /
+EMP-01 / DEATH-02 FAIL only a document that is in Bangla without a translation; a bilingual
+(partly Bangla) document without a separate translation page is FLAG.
+
+**2.2 and every "must belong to the father or mother" rule.** When a parent's reference
+name could not be read at all (e.g. the Birth Certificate's father field), a document that
+might be that parent's is FLAG ("could not be assigned with certainty"), not FAIL
+("unknown person"). LANG-02 likewise FLAGs, not FAILs, when StudentRef is missing.
+
+**4.4 / notarisation (all documents).** A seal counts as a notary stamp when its own ring
+text, read by seal recognition, has a word starting with "NOTAR" or "ADVOCAT" (so misreads
+such as "NOTARY PULIC" still count, but "REG NO TAREK" does not). A seal whose text says
+something else (a government emblem, a Union Parishad or university seal, an apostille's
+consular seal) does not count. Only a seal with no readable text can be confirmed by
+"Notary Public"/"Advocate" printed next to it.
+
+**4.5 Bank.** BANK-03 compares the solvency date with the statement that has the same
+account number, but only when both numbers were read reliably; otherwise it does not pick a
+statement on shaky digits and FLAGs unless some statement's date matches. Dates must be
+identical (a one-day difference is FAIL, as written).
+
+**4.8 detail.** ACAD-02 never FAILs "no transcript" (or "no certificate") while a document
+whose level could not be read might be the missing partner: that is FLAG.
+
+**4.6 Trade License.** TRADE-03: a fiscal year later than the current one (e.g. a licence
+renewed early) is FLAG, not PASS.
+
+**4.7 TIN.** *(TIN-03 approved.)* TIN-03 compares the taxpayer with the Trade License owner; when there is no
+Trade License but an Employment Certificate, it compares with the employee instead.
+TIN-02 treats ZXing's QR value as exact.
+
+**4.8 Academic.**
+* ACAD-01 needs the online check. Until online checks are enabled, an official link
+  (https://apostille.mygov.bd/...) is FLAG ("not verified online"), a link to any other
+  site or over http is FAIL ("QR invalid"), an undecodable QR is FLAG.
+* *(Approved.)* ACAD-02: real submissions give each certificate and each transcript its own e-Apostille
+  page, so "every e-Apostille followed by a Certificate AND a Transcript" is read as "every
+  level needs both its certificate and its transcript". A missing transcript FAILs (as
+  written); a missing certificate also FAILs (the pair is mandatory). An apostille not
+  followed by an academic document is FLAG. No academic documents at all is FLAG (section 3
+  does not list academics as required).
+* *(Approved.)* ACAD-03: the rulebook only says when to PASS. Any other combination is FLAG.
+* ACAD-04: name and SSC/Dakhil date-of-birth mismatches are FLAG (as written), even
+  though an uncovered name mismatch elsewhere would FAIL under 5.2.
+
+**4.9 Income Tax.** Optional: no tax documents is PASS (TAX-01) and TAX-02..04 only run
+for the documents present. TAX-04 needs the online challan check; until it is enabled a
+challan is FLAG ("not verified online").
+
+**4.10 IELTS/TOPIK.** Optional: absent produces no LANG results and REQ-10 notes it.
+"Within 2 years" is counted from the test date (IELTS) or issue date (TOPIK), inclusive.
+
+**Online checks (ACAD-01, TAX-04)**, enabled with the owner's permission (2026-11-11).
+The rules engine never goes online; `hklv_online` fills in each e-Apostille's and
+challan's result between extraction and the rules.
+
+* e-Apostille: the application number from the QR (only from an https link on
+  apostille.mygov.bd) is looked up at `https://apostille.mygov.bd/application-details/<n>`.
+  The register confirming the number -> VERIFIED (PASS); the register's "not found" answer
+  -> NOT_FOUND (FAIL: QR invalid); anything else -> UNAVAILABLE (FLAG). Limitation: this
+  proves the apostille exists in the official register, not that its contents match the
+  scan; the record page itself refuses automated access and the engine does not try to
+  get around that.
+* Challan: challanverification.finance.gov.bd shows automated challans (A-challan numbers,
+  `YYYY-NNNNNNNNNN`) by embedding the Finance Division's A-challan system,
+  www.achallan.gov.bd, so that is the host the check calls. Found -> the website amount is
+  compared with the printed amount (TAX-04 PASS/FAIL); no such challan, or a challan with a
+  refund request (marked "not valid for any service"), -> NOT_FOUND (FAIL); anything else
+  -> UNAVAILABLE (FLAG). Bank-counter challans need bank, branch and date on the site's form
+  and are left for manual review (FLAG). No real challan has been checked yet: the sample
+  set has none.
+* Only those two official hosts are ever contacted, over https; the QR's own URL is never
+  opened (the official URL is rebuilt from the number), and redirects elsewhere are refused.
+* `scripts/run_case.py --offline` turns the checks off (ACAD-01 / TAX-04 then FLAG).

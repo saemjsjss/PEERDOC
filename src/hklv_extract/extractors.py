@@ -17,7 +17,7 @@ from hklv_rules.models import documents as m
 from hklv_rules.models.common import Extracted, NotaryInfo, Person
 
 from .classify import PageKind
-from .common_fields import NOTARY_RE, TRANSLATION_RE, document_language, has_translation, notary_info, page_language
+from .common_fields import document_language, has_translation, notary_info, page_language
 from .confidence import AGREE_CAP, DISAGREE, MRZ_INVALID, MRZ_VALID, SINGLE_READER_FACTOR, VL_ONLY, date_field, derived, score_text, text_field
 from .dates import parse_date, parse_words_date
 from .group import PageGroup
@@ -68,8 +68,13 @@ def _text(group: PageGroup, labels: Sequence[str], pattern: str, pages: Sequence
     return text_field(found, page)
 
 
+# A date value must contain a 4-digit year. Lines without one (another label such as
+# "Holder's Signature" between "Date of Expiry" and "03JUN2033") are skipped.
+DATE_VALUE = r".{0,30}\d{4}.{0,15}"
+
+
 def _date(group: PageGroup, labels: Sequence[str], pages: Sequence[PageReading] | None = None) -> Extracted[date]:
-    found, page = _first(group, lambda p: find_labeled(p, labels, value_pattern=r".{6,40}"), pages)
+    found, page = _first(group, lambda p: find_labeled(p, labels, value_pattern=DATE_VALUE), pages)
     if found is None:
         return Extracted[date]()
     d = parse_date(found.value)
@@ -110,8 +115,40 @@ def _agree_with_mrz(printed: Extracted[str], mrz_name: str) -> Extracted[str]:
     return printed
 
 
+# What makes an NID page a translation. Notary text alone does not: a notarised photocopy
+# of the card carries "Notary Public" / "Advocate" too, and must not count as its own
+# translation (NID-01/NID-03 would then pass with no translation page).
+NID_TRANSLATION_RE = re.compile(
+    r"\btranslat(?:ed|ion)\b"
+    r"|\btrue\s*copy\b"
+    r"|\bauthori[sz]ed\s+to\s+translate\b"
+    r"|\benglish\s+version\b",
+    re.IGNORECASE,
+)
+# A single page cannot reliably be both the card and its separate translation.
+SINGLE_PAGE_NO_TRANSLATION = 0.6
+
+
 def _translation_pages(group: PageGroup) -> list[PageReading]:
-    return [p for p in group.pages if NOTARY_RE.search(p.line_text) or TRANSLATION_RE.search(p.line_text)]
+    """Pages that are the separate translation of the card: they carry a translation marker.
+
+    If no page or every page is marked, the group has no separate translation page and the
+    result is empty (the card page is never also read as the translation).
+    """
+    marked = [p for p in group.pages if NID_TRANSLATION_RE.search(p.line_text) or NID_TRANSLATION_RE.search(p.block_text)]
+    if not marked or len(marked) == len(group.pages):
+        return []
+    return marked
+
+
+def _nid_has_translation(group: PageGroup, translation: Sequence[PageReading]) -> Extracted[bool]:
+    if translation:
+        return Extracted[bool](value=True, confidence=0.95, source_page=translation[0].page_no)
+    found = has_translation(group.pages)
+    if len(group.pages) == 1 and found.value:
+        # The only page is the card: not a confirmed translation, not a confirmed absence.
+        return Extracted[bool](value=False, confidence=SINGLE_PAGE_NO_TRANSLATION, source_page=group.pages[0].page_no)
+    return found
 
 
 def _notary(group: PageGroup) -> NotaryInfo:
@@ -173,6 +210,9 @@ def passport(group: PageGroup, doc_id: str) -> m.Passport:
     # Labels are bilingual ("<Bangla>/Surname"); OCR often garbles them ("/Suame").
     surname = _name(group, [r"Surname", r"/\s*Su\w{0,3}me\b"])
     given = _name(group, [r"Given\s*Names?"])
+    # Always read the printed expiry, MRZ or not: PASSPORT-01 compares it with the MRZ's.
+    # Bilingual garbled labels ("craaacf afiky/Date of Expiry") still contain the English part.
+    printed_expiry = _date(group, [r"Date\s*of\s*Expiry"])
     fields: dict = {}
     if mrz is not None:
         page_no = _mrz_page(group, mrz)
@@ -190,13 +230,14 @@ def passport(group: PageGroup, doc_id: str) -> m.Passport:
         fields = {
             "passport_number": _text(group, [r"Passport\s*No\.?", r"Passport\s*Number"], r"[A-Z]{1,2}\d{7,8}"),
             "date_of_birth": _date(group, [r"Date\s*of\s*Birth"]),
-            "date_of_expiry": _date(group, [r"Date\s*of\s*Expiry"]),
+            "date_of_expiry": printed_expiry,
         }
     return m.Passport(
         doc_id=doc_id,
         pages=group.page_nos,
         surname=surname,
         given_names=given,
+        printed_date_of_expiry=printed_expiry,
         father_name=_name(group, [r"Father'?s?\s*Name"]),
         mother_name=_name(group, [r"Mother'?s?\s*Name"]),
         **fields,
@@ -231,11 +272,7 @@ def nid(group: PageGroup, doc_id: str) -> m.NationalId:
         date_of_birth=dob,
         number_on_card=number_on_card,
         number_on_translation=number_on_translation,
-        has_english_translation=(
-            Extracted[bool](value=True, confidence=0.95, source_page=translation[0].page_no)
-            if translation
-            else has_translation(group.pages)
-        ),
+        has_english_translation=_nid_has_translation(group, translation),
         notary=_notary(group),
     )
 
@@ -516,6 +553,43 @@ def tax_certificate(group: PageGroup, doc_id: str) -> m.IncomeTaxCertificate:
     return m.IncomeTaxCertificate(doc_id=doc_id, pages=group.page_nos, taxpayer_name=_holder_from_sentence(group))
 
 
+# --- language test (optional) ------------------------------------------------------------
+
+
+def language_test(group: PageGroup, doc_id: str) -> m.LanguageTest:
+    """IELTS Test Report Form or TOPIK certificate. Not yet seen on a real sample: labels
+    follow the published layouts; anything not found stays empty (rules FLAG it)."""
+    text = "\n".join(p.line_text for p in group.pages)
+    kind = None
+    for name, value in (("IELTS", m.LanguageTestKind.IELTS), ("TOPIK", m.LanguageTestKind.TOPIK)):
+        line = next((ln for p in group.pages for ln in p.lines if name in ln.text.upper()), None)
+        if line is not None:
+            kind = Extracted[m.LanguageTestKind](value=value, confidence=round(min(line.score, AGREE_CAP), 4), source_page=group.pages[0].page_no)
+            break
+    # IELTS prints the name in two fields; TOPIK in one.
+    family = _name(group, [r"Family\s*Name", r"Surname"])
+    first = _name(group, [r"First\s*Names?", r"Given\s*Names?"])
+    if family.value and first.value:
+        name = Extracted[str](
+            value=f"{first.value} {family.value}",
+            confidence=min(family.confidence, first.confidence),
+            source_page=family.source_page,
+        )
+    else:
+        name = _name(group, [r"Candidate'?s?\s*Name", r"(?<!Family )(?<!First )Name(?!\s*of)"])
+    test_date = _date(group, [r"Test\s*Date", r"Date\s*of\s*Test", r"Date\s*of\s*(?:Issue|Exam(?:ination)?)", r"Issue\s*Date"])
+    if test_date.value is None and "IELTS" in text.upper():
+        test_date = _date(group, [r"(?<!of )\bDate\b(?!\s*of)"])  # IELTS TRF header: "Date 12/OCT/2026"
+    return m.LanguageTest(
+        doc_id=doc_id,
+        pages=group.page_nos,
+        test=kind or Extracted[m.LanguageTestKind](),
+        candidate_name=name,
+        date_of_birth=_date(group, [r"Date\s*of\s*Birth", r"Birth\s*Date"]),
+        test_date=test_date,
+    )
+
+
 # --- academic ----------------------------------------------------------------------------
 
 _LEVELS = (
@@ -644,4 +718,5 @@ EXTRACTORS: dict[PageKind, Callable[[PageGroup, str], object]] = {
     PageKind.E_APOSTILLE: e_apostille,
     PageKind.ACADEMIC_CERTIFICATE: academic_certificate,
     PageKind.ACADEMIC_TRANSCRIPT: academic_transcript,
+    PageKind.LANGUAGE_TEST: language_test,
 }

@@ -192,6 +192,63 @@ def test_nid_card_number_from_mrz_and_translation_number_from_text():
     assert doc.notary.stamp_present.value is True and doc.notary.stamp_present.confidence == 0.95
 
 
+def test_notarised_card_page_alone_is_not_its_own_translation():
+    card = make_page(
+        ["NATIONAL ID CARD", "Name: RAHIMA BEGUM", "ID NO: 5551234567", "Notary Public, Whole of Bangladesh"],
+        seal=True,
+    )
+    (g,) = groups_for(card)
+    doc = nid(g, "nid-1")
+    assert doc.number_on_card.value == "5551234567"
+    assert doc.has_english_translation.value is not True
+    assert doc.number_on_translation.value is None
+
+
+def test_every_page_marked_means_no_separate_translation_page():
+    a = make_page(["Translated True Copy", "National ID Card", "NID No: 5551234567"], page_no=1)
+    b = make_page(["Translated True Copy", "NATIONAL ID CARD", "Name: RAHIMA BEGUM", "NID No: 5551234567"], page_no=2)
+    (g,) = groups_for(a, b)
+    assert nid(g, "nid-1").number_on_translation.value is None
+
+
+@pytest.mark.parametrize("marker", ["Translated True Copy", "Authorized to translate", "TrueCopy", "English Version"])
+def test_translation_markers_make_a_translation_page(marker):
+    translation = make_page(["Notary Public", marker, "National ID Card", "NID No: 5551234567"], page_no=1)
+    card = make_page(["NATIONAL ID CARD", "Name", "RAHIMA BEGUM", *td1()], page_no=2)
+    (g,) = groups_for(translation, card)
+    doc = nid(g, "nid-1")
+    assert doc.number_on_translation.value == "5551234567"
+    assert doc.has_english_translation.value is True
+
+
+def test_passport_printed_expiry_read_below_a_garbled_bilingual_label_with_mrz():
+    page = make_page(
+        ["PASSPORT", "Surname", "UDDIN", "Given Names", "KAMAL",
+         "craaacf afiky/Date of Expiry", "es/Holder's Signature", "03JUN2033", *td3(expiry="330603")]
+    )
+    (g,) = groups_for(page)
+    p = passport(g, "passport-1")
+    assert p.date_of_expiry.value == date(2033, 6, 3) and p.date_of_expiry.is_reliable(0.9)
+    assert p.printed_date_of_expiry.value == date(2033, 6, 3) and p.printed_date_of_expiry.is_reliable(0.9)
+
+
+def test_passport_printed_expiry_kept_apart_from_a_different_mrz_expiry():
+    page = make_page(["PASSPORT", "Date of Expiry", "03JUN2033", *td3()])  # MRZ expiry 01-01-2031
+    (g,) = groups_for(page)
+    p = passport(g, "passport-1")
+    assert p.date_of_expiry.value == date(2031, 1, 1)
+    assert p.printed_date_of_expiry.value == date(2033, 6, 3)
+
+
+def test_passport_without_mrz_takes_the_printed_expiry():
+    from hklv_extract.group import PageGroup
+
+    page = make_page(["PASSPORT", "Passport No: K12345678", "Date of Expiry", "03JUN2033"])
+    g = PageGroup(kind=PageKind.PASSPORT, pages=[page], classes=[classify_page(page, TODAY)])  # no MRZ read
+    p = passport(g, "passport-1")
+    assert p.date_of_expiry.value == p.printed_date_of_expiry.value == date(2033, 6, 3)
+
+
 def test_missing_seal_is_low_confidence_not_a_hard_no():
     page = make_page(["Notary Public", "National ID Card", "Name: RAHIMA BEGUM"])
     (g,) = groups_for(page)
@@ -407,3 +464,56 @@ def test_seal_next_to_notary_text_is_confirmed_a_far_or_weak_one_is_not():
     for seal, reliable in ((near, True), (far, False), (weak, False)):
         page = base.model_copy(update={"blocks": (*base.blocks, seal)})
         assert notary_info([page]).stamp_present.is_reliable(0.9) is reliable
+
+
+def test_ielts_test_report_form_is_extracted():
+    from hklv_extract.extractors import language_test
+
+    page = make_page(
+        [
+            "IELTS",
+            "Test Report Form",
+            "Date 12/OCT/2026",
+            "Family Name: UDDIN",
+            "First Name: KAMAL",
+            "Date of Birth 15/02/1999",
+        ],
+        page_no=1,
+    )
+    (g,) = groups_for(page)
+    assert g.kind == PageKind.LANGUAGE_TEST
+    doc = language_test(g, "language_test-1")
+    assert doc.test.value.value == "IELTS"
+    assert doc.candidate_name.value == "KAMAL UDDIN" and doc.candidate_name.is_reliable(0.9)
+    assert doc.date_of_birth.value == date(1999, 2, 15)
+    assert doc.test_date.value == date(2026, 10, 12)
+
+
+def test_language_test_reaches_the_case_file():
+    case, _ = build_case(CaseReading(pages=(make_page(["TOPIK", "Name: KAMAL UDDIN", "Date of Birth: 15/02/1999", "Date of Issue: 01/06/2026"]),)), "c", TODAY)
+    (doc,) = case.documents
+    assert doc.kind == "language_test" and doc.test.value.value == "TOPIK"
+    assert doc.candidate_name.value == "KAMAL UDDIN" and doc.test_date.value == date(2026, 6, 1)
+
+
+@pytest.mark.parametrize(
+    "seal_text,reliable",
+    [
+        ("ADVOCATE MD SAMPLE NAME\nNOTARY PUBLIC\nWHOLE OF BANGLADESH", True),
+        ("ADVOCATE MD SAMPLE NAME\nNOTARY PULIC", True),  # misread "PUBLIC", stems survive
+        ("NOTARYY PUBLIC\nGOVT.OF BANGLADESH", True),
+        ("GOVERNMENT OF THE PEOPLE'S REPUBLIC OF BANGLADESH", False),  # an emblem, not a notary
+        ("\u4e2d\u534e\u4eba\u6c11", False),  # made-up text from the VL model
+    ],
+)
+def test_seal_is_confirmed_by_its_own_ring_text(seal_text, reliable):
+    from hklv_extract.common_fields import notary_info
+    from hklv_ocr.reading import LayoutBlock
+
+    # Notary wording printed right next to the seal must NOT rescue a seal whose own text
+    # says something else: the seal's text decides when it was read.
+    base = make_page(["National ID Card", "Notary Public, Whole of Bangladesh"])
+    line = base.lines[-1]
+    seal = LayoutBlock(label="seal", text=seal_text, box=(line.box[0], line.box[3] + 20, line.box[0] + 300, line.box[3] + 320), score=0.82)
+    page = base.model_copy(update={"blocks": (*base.blocks, seal)})
+    assert notary_info([page]).stamp_present.is_reliable(0.9) is reliable

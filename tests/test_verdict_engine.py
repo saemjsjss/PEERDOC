@@ -85,22 +85,31 @@ def outcomes_without_coverage(verdict):
     return {x.outcome for x in verdict.results if x.rule_id != COVERAGE_RULE}
 
 
-def test_clean_case_passes_every_rule_but_coverage_keeps_it_flagged():
+def test_every_rule_group_is_implemented():
+    assert NOT_YET_IMPLEMENTED == ()
+
+
+def test_clean_case_passes_every_rule():
     v = evaluate_case(case_file(*complete_case_documents()))
-    assert outcomes_without_coverage(v) == {P}
-    assert v.outcome is G  # the engine is not complete yet: never a clean PASS
-    assert [x.rule_id for x in v.flags] == [COVERAGE_RULE]
+    assert v.outcome is P, [(x.rule_id, x.reason) for x in v.results if x.outcome is not P]
+    assert COVERAGE_RULE not in {x.rule_id for x in v.results}
 
 
-def test_clean_case_would_pass_once_every_rule_is_written(monkeypatch):
-    monkeypatch.setattr("hklv_rules.engine.NOT_YET_IMPLEMENTED", ())
-    assert evaluate_case(case_file(*complete_case_documents())).outcome is P
-
-
-def test_coverage_flag_lists_missing_rules():
+def test_a_rule_missing_from_the_engine_keeps_every_case_flagged(monkeypatch):
+    monkeypatch.setattr("hklv_rules.engine.NOT_YET_IMPLEMENTED", ("NEW-01",))
     v = evaluate_case(case_file(*complete_case_documents()))
+    assert v.outcome is G
     [cov] = [x for x in v.results if x.rule_id == COVERAGE_RULE]
-    assert all(rule in cov.reason for rule in NOT_YET_IMPLEMENTED)
+    assert "NEW-01" in cov.reason
+
+
+def test_missing_optional_documents_do_not_flag():
+    # No Income Tax, no Student NID, no IELTS/TOPIK in the clean case: still a clean PASS.
+    v = evaluate_case(case_file(*complete_case_documents()))
+    by_id = {x.rule_id: x for x in v.results}
+    assert by_id["REQ-10"].outcome is P and "IELTS/TOPIK not submitted" in by_id["REQ-10"].reason
+    assert by_id["TAX-01"].outcome is P
+    assert not any(x.rule_id.startswith("LANG-") for x in v.results)
 
 
 def test_tin_father_and_trade_mother_fails_the_case():
@@ -129,8 +138,13 @@ def test_missing_parent_identity_fails_the_case():
 
 def test_run_all_rules_covers_each_rule_group():
     ids = {x.rule_id for x in run_all_rules(EvaluationContext.build(case_file(*complete_case_documents(), employment())))}
-    for expected in ("REQ-01", "NID-ASSIGN", "FRC-01", "EMP-01", "CHAIN-01", COVERAGE_RULE):
-        assert expected in ids
+    for expected in (
+        "REQ-01", "PASSPORT-01", "NID-ASSIGN", "NID-01", "NID-02", "NID-03", "BIRTH-01", "BIRTH-04",
+        "FRC-01", "BANK-01", "BANK-04", "TRADE-01", "TRADE-04", "EMP-01", "TIN-01", "TIN-03",
+        "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04", "TAX-01", "CHAIN-01",
+    ):
+        assert expected in ids, expected
+    assert COVERAGE_RULE not in ids
 
 
 def test_death_certificate_rule_results_reach_the_final_verdict():

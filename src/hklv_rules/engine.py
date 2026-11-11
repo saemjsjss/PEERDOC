@@ -3,9 +3,9 @@
 `final_verdict` turns a list of rule results into the overall verdict:
     any FAIL -> FAIL;  else any FLAG -> FLAG;  else PASS.
 
-`evaluate_case` runs every rule written so far on one student's documents and returns
-that verdict. Rule groups not yet written are reported as an ENGINE-COVERAGE FLAG, so an
-incomplete engine can never hand out a clean PASS.
+`evaluate_case` runs every Rulebook v2.5 rule on one student's documents and returns that
+verdict. NOT_YET_IMPLEMENTED is kept as a safety net: anything listed there is reported as
+an ENGINE-COVERAGE FLAG, so an incomplete engine can never hand out a clean PASS.
 """
 
 from __future__ import annotations
@@ -16,27 +16,27 @@ from .context import EvaluationContext
 from .models import DEFAULT_CONFIDENCE_THRESHOLD, CaseFile, CaseVerdict, Outcome, RuleResult, worst
 from .rules import (
     assign_nids,
+    check_academic,
+    check_bank,
+    check_birth_certificates,
     check_death_certificates,
     check_employment,
     check_financial_chain,
     check_frc,
+    check_income_tax,
+    check_language_tests,
+    check_nids,
+    check_passport,
     check_required_documents,
+    check_tin,
+    check_trade_licenses,
 )
 
 COVERAGE_RULE = "ENGINE-COVERAGE"
 
-# Remove each entry as its rules land. While anything is listed, every case gets a FLAG.
-NOT_YET_IMPLEMENTED: tuple[str, ...] = (
-    "PASSPORT-01",
-    "NID-01..03",
-    "BIRTH-01..04",
-    "BANK-01..04",
-    "TRADE-01..04",
-    "TIN-01..03",
-    "ACAD-01..04",
-    "TAX-01..04",
-    "LANG-01..02",
-)
+# Every rule group of Rulebook v2.5 is implemented. If a rule is ever added to the
+# rulebook before its code, list it here: every case then gets a FLAG until it lands.
+NOT_YET_IMPLEMENTED: tuple[str, ...] = ()
 
 
 def final_verdict(results: Iterable[RuleResult]) -> CaseVerdict:
@@ -76,12 +76,21 @@ def run_all_rules(ctx: EvaluationContext) -> list[RuleResult]:
     nids = assign_nids(ctx)
     deaths = check_death_certificates(ctx)
     results = [
-        *check_required_documents(ctx, nids, deaths),
-        *nids.results,
+        *check_required_documents(ctx, nids, deaths),  # section 3
+        *check_passport(ctx),  # 4.1
+        *nids.results,  # 2.2
+        *check_nids(ctx, nids),  # 4.2
         *deaths.results,
-        *check_frc(ctx),
-        *check_employment(ctx),
-        *check_financial_chain(ctx),
+        *check_birth_certificates(ctx),  # 4.3
+        *check_frc(ctx),  # 4.4
+        *check_bank(ctx),  # 4.5
+        *check_trade_licenses(ctx),  # 4.6
+        *check_employment(ctx),  # 4.6 (Employment Certificate, supplement)
+        *check_tin(ctx),  # 4.7
+        *check_academic(ctx),  # 4.8
+        *check_income_tax(ctx),  # 4.9 (optional)
+        *check_language_tests(ctx),  # 4.10 (optional)
+        *check_financial_chain(ctx),  # 5.1
     ]
     if NOT_YET_IMPLEMENTED:
         results.append(

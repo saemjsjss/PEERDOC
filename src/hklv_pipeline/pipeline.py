@@ -2,6 +2,7 @@
 
     Pass 1   OCR (three readers, GPU)         hklv_ocr.readers.PageReader
              classification + extraction      hklv_extract.build.build_case
+             online checks (optional)         hklv_online.apply_online_checks (ACAD-01, TAX-04)
     Pass 2/3 anchors + Rulebook v2.5 rules    hklv_rules.engine.evaluate_case
 
 `run_case` is async because OCR is (the future FastAPI service awaits it). Everything
@@ -11,6 +12,7 @@ GPU, e.g. after a rule changes.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import time
@@ -74,12 +76,26 @@ def evaluate_reading(
     evaluation_date: date,
     threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     seconds: dict[str, float] | None = None,
+    online: bool = False,
+    fetch=None,
 ) -> PipelineResult:
-    """Pass 1 extraction + Pass 2/3 rules on an existing reading (no GPU needed)."""
+    """Pass 1 extraction (+ online checks) + Pass 2/3 rules on an existing reading (no GPU).
+
+    `online=True` checks e-Apostilles and automated challans on the official sites
+    (blocking HTTP; `fetch` replaces the HTTP call in tests). Without it, ACAD-01 / TAX-04
+    report "not verified online" (FLAG).
+    """
     timings = dict(seconds or {})
     t = time.perf_counter()
     case, report = build_case(reading, case_id, evaluation_date)
     timings["extraction"] = time.perf_counter() - t
+    if online:
+        from hklv_online import apply_online_checks
+        from hklv_online.checks import http_fetch
+
+        t = time.perf_counter()
+        case = apply_online_checks(case, fetch or http_fetch)
+        timings["online"] = time.perf_counter() - t
     t = time.perf_counter()
     verdict = evaluate_case(case, threshold)
     timings["rules"] = time.perf_counter() - t
@@ -95,6 +111,8 @@ async def run_case(
     threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     on_reading=None,
     progress=None,
+    online: bool = False,
+    fetch=None,
 ) -> PipelineResult:
     """OCR every upload in `folder`, extract the documents, run the rules.
 
@@ -118,7 +136,17 @@ async def run_case(
     timings["ocr"] = time.perf_counter() - t
     if on_reading is not None:
         on_reading(reading)
-    return evaluate_reading(reading, case_id=case_id, evaluation_date=evaluation_date, threshold=threshold, seconds=timings)
+    # Online checks block on HTTP: keep them off the event loop.
+    return await asyncio.to_thread(
+        evaluate_reading,
+        reading,
+        case_id=case_id,
+        evaluation_date=evaluation_date,
+        threshold=threshold,
+        seconds=timings,
+        online=online,
+        fetch=fetch,
+    )
 
 
 # --- report ------------------------------------------------------------------------------

@@ -82,6 +82,22 @@ def _describe(e: Exception) -> str:
     return f"{type(e).__name__}: {e}"
 
 
+def _print_online(result, offline: bool) -> None:
+    from hklv_rules.models import EApostille, IncomeTaxChallan
+
+    docs = [d for d in result.case.documents if isinstance(d, (EApostille, IncomeTaxChallan))]
+    if not docs:
+        return
+    if offline:
+        print(f"Online checks: off (--offline); {len(docs)} e-Apostille/challan document(s) not verified", flush=True)
+        return
+    print("Online checks:", flush=True)
+    for d in docs:
+        status = d.online.status.value if d.online else "not checked (link not on the official site, or no number)"
+        detail = f": {d.online.detail}" if d.online and d.online.detail else ""
+        print(f"  {d.doc_id}: {status}{detail}", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = _Parser(description="OCR + extraction + rules for one student's folder")
     ap.add_argument("folder", help="Folder with the student's PDFs/images (Windows paths accepted in WSL)")
@@ -90,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", help="Output folder (default: ocr_output/<folder name>)")
     ap.add_argument("--reading", help="Skip OCR: judge this saved reading.json instead")
     ap.add_argument("--no-pages", action="store_true", help="Don't print the page-by-page classification")
+    ap.add_argument(
+        "--offline",
+        action="store_true",
+        help="Don't check e-Apostilles and challans on the official sites (ACAD-01/TAX-04 then FLAG)",
+    )
     args = ap.parse_args(argv)
 
     try:
@@ -131,7 +152,7 @@ def _run(args) -> int:
     if reading_file is not None:
         reading = CaseReading.model_validate_json(reading_file.read_text(encoding="utf-8"))
         print(f"Using saved reading ({len(reading.pages)} pages); OCR skipped", flush=True)
-        result = evaluate_reading(reading, case_id=case_id, evaluation_date=evaluation_date)
+        result = evaluate_reading(reading, case_id=case_id, evaluation_date=evaluation_date, online=not args.offline)
     else:
 
         def save_reading(reading: CaseReading) -> None:
@@ -149,7 +170,14 @@ def _run(args) -> int:
 
         print("Loading OCR models, then reading one page at a time...", flush=True)
         result = asyncio.run(
-            run_case(folder, case_id=case_id, evaluation_date=evaluation_date, on_reading=save_reading, progress=show_page)
+            run_case(
+                folder,
+                case_id=case_id,
+                evaluation_date=evaluation_date,
+                on_reading=save_reading,
+                progress=show_page,
+                online=not args.offline,
+            )
         )
         if stats:
             peak = max(s.gpu_peak_reserved_mb for s in stats) / 1024
@@ -157,6 +185,7 @@ def _run(args) -> int:
             print(f"OCR: {len(stats)} pages, {sum(s.seconds for s in stats):.0f}s, GPU peak {peak:.2f} GB, slowest page {slowest.seconds:.0f}s", flush=True)
             _write_json(out / "ocr_stats.json", [vars(s) for s in stats])
 
+    _print_online(result, offline=args.offline)
     print()
     print(format_verdict(result, show_pages=not args.no_pages))
     _write_json(out / "case.json", {"pages": result.report.model_dump(mode="json")["pages"], "case": result.case.model_dump(mode="json")})
