@@ -145,16 +145,28 @@ def test_statement_account_number_missing_flags():
     assert "statement" in r.reason
 
 
-def test_low_confidence_solvency_number_flags_even_if_digits_equal():
+def test_low_confidence_solvency_number_passes_when_digits_equal_exactly():
+    # a misread can't land exactly on the other document's reliably read number
     sol = bank_solvency().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
     r = run(sol, bank_statement())["BANK-02"]
-    assert r.outcome is Outcome.FLAG
+    assert r.outcome is Outcome.PASS
     assert "low OCR confidence" in r.reason
 
 
-def test_low_confidence_statement_number_flags_even_if_digits_equal():
+def test_low_confidence_statement_number_passes_when_digits_equal_exactly():
     st = bank_statement().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
-    assert run(bank_solvency(), st)["BANK-02"].outcome is Outcome.FLAG
+    assert run(bank_solvency(), st)["BANK-02"].outcome is Outcome.PASS
+
+
+def test_low_confidence_number_that_differs_flags():
+    sol = bank_solvency().model_copy(update={"account_number": ex("0123456780", LOW)})
+    assert run(sol, bank_statement())["BANK-02"].outcome is Outcome.FLAG
+
+
+def test_both_numbers_low_confidence_flags_even_if_equal():
+    sol = bank_solvency().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
+    st = bank_statement().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
+    assert run(sol, st)["BANK-02"].outcome is Outcome.FLAG
 
 
 def test_matches_one_of_several_statements_passes():

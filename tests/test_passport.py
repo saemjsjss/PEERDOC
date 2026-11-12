@@ -179,8 +179,12 @@ def test_low_confidence_mrz_name_flags_even_if_identical():
     assert "MRZ name read with low OCR confidence" in r.reason
 
 
-def test_low_confidence_printed_name_flags():
-    r = one(with_fields(given_names=ex("TANVIR", LOW)))
+def test_low_confidence_printed_name_confirmed_by_agreeing_mrz_passes():
+    assert one(with_fields(given_names=ex("TANVIR", LOW))).outcome is Outcome.PASS
+
+
+def test_low_confidence_printed_name_flags_when_mrz_disagrees():
+    r = one(with_fields(given_names=ex("TANVIR", LOW), mrz_given_names=ex("TANVIER")))
     assert r.outcome is Outcome.FLAG
     assert "printed name read with low OCR confidence" in r.reason
 

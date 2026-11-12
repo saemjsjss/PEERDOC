@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 from .models import BirthCertificate, CaseFile, Extracted, Passport, Person
 from .models.common import Frozen
-from .names import normalize_name, same_name
+from .names import mrz_name_matches, normalize_name
 
 
 class Anchor(Frozen):
@@ -73,14 +73,16 @@ def _student_anchor(passports: list[Passport], threshold: float) -> Anchor:
         if not printed:
             candidates.append(Anchor(person=Person.STUDENT, note=f"passport {p.doc_id}: printed name not found"))
             continue
+        # A reliable MRZ that agrees is a second, independent reading: it confirms a low-confidence print.
+        agrees = bool(mrz) and mrz_ok and mrz_name_matches(mrz, printed)
         problems = []
-        if not printed_ok:
+        if not printed_ok and not agrees:
             problems.append("printed name has low OCR confidence")
         if not mrz:
             problems.append("MRZ name not found")
         elif not mrz_ok:
             problems.append("MRZ name has low OCR confidence")
-        elif not same_name(mrz, printed):
+        elif not agrees:
             problems.append(f"MRZ name '{mrz}' differs from printed name '{printed}'")
         candidates.append(
             Anchor(

@@ -156,7 +156,14 @@ def _has_transaction_table(page: PageReading) -> bool:
     return in_lines or in_table
 
 
-_LICENCE_NUMBER = re.compile(r"TRADE\s*LICEN[CS]E\s*No\.?\s*[:\-]?\s*\d+", re.IGNORECASE)
+# the number may carry an OCR letter slip ('D60631')
+_LICENCE_NUMBER = re.compile(r"TRADE\s*LICEN[CS]E\s*No\.?\s*[:\-]?\s*[A-Z0-9]*\d[A-Z0-9]*", re.IGNORECASE)
+
+
+_LANGUAGE_FORM = re.compile(
+    r"Candidate|Test[\s-]*taker|Date\s*of\s*Birth|Registration\s*No|Test\s*(?:Report|Date)|Score\s*Report",
+    re.IGNORECASE,
+)
 
 
 def _only_translators_licence(text: str) -> bool:
@@ -237,7 +244,8 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.ACADEMIC_TRANSCRIPT, "academic transcript / grade sheet")
     if has["acad_cert"] and has["acad_award"] and re.search(r"CERTIF(?:Y|IED|ICATE)", text, re.IGNORECASE):
         return out(PageKind.ACADEMIC_CERTIFICATE, "board/university certificate")
-    if has["language_test"]:
+    # A personal statement also says "IELTS 6.5" or "TOPIK": the test's own form fields are needed too.
+    if has["language_test"] and _LANGUAGE_FORM.search(text):
         return out(PageKind.LANGUAGE_TEST, "IELTS / TOPIK")
     return out(PageKind.IGNORED, "no signature matched (IGNORE-01)")
 

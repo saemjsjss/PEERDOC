@@ -57,3 +57,12 @@ def same_name(a: str, b: str) -> bool:
         return True
     words_a = _words(a)
     return bool(words_a) and words_a == _words(b)
+
+
+# Names hold no digits, so a digit in an MRZ name is an OCR slip ('AFR0Z' is 'AFROZ').
+_DIGIT_TO_LETTER = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"})
+
+
+def mrz_name_matches(mrz: str, printed: str) -> bool:
+    """same_name, reading digits in the MRZ name as their look-alike letters."""
+    return same_name(mrz.translate(_DIGIT_TO_LETTER), printed)

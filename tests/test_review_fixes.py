@@ -286,3 +286,62 @@ def test_frc_rows_the_table_reader_dropped_flag_instead_of_fail():
     members = frc_extract(_group(PageKind.FRC, page), "f").members
     assert {mb.relation.value for mb in members} == {"SELF", "FATHER", "MOTHER"}
     assert all(not mb.relation.is_reliable(0.9) for mb in members)
+
+
+
+# --- a digit in the MRZ name is an OCR slip; an agreeing MRZ confirms a shaky print --------
+
+
+def _passport_ctx(mrz_surname, printed_confidence):
+    from builders import birth_certificate, ex, passport
+
+    p = passport(surname="AFROZ", mrz_surname=mrz_surname)
+    p = p.model_copy(update={"surname": ex("AFROZ", printed_confidence)})
+    return context(p, birth_certificate(name="TANVIR AFROZ"), with_identity_docs=False)
+
+
+def test_mrz_zero_for_o_confirms_a_low_confidence_printed_name():
+    from builders import LOW
+
+    from hklv_rules.rules import check_passport
+
+    ctx = _passport_ctx("AFR0Z", LOW)
+    assert ctx.anchors.student.certain
+    assert by_rule(check_passport(ctx))["PASSPORT-01"].outcome is Outcome.PASS
+
+
+def test_mrz_that_disagrees_still_leaves_a_low_confidence_print_uncertain():
+    from builders import LOW
+
+    from hklv_rules.rules import check_passport
+
+    ctx = _passport_ctx("AFROSE", LOW)
+    assert not ctx.anchors.student.certain
+    assert by_rule(check_passport(ctx))["PASSPORT-01"].outcome is Outcome.FLAG
+
+
+# --- pages that only mention a trade licence or a language test ----------------------------
+
+
+def test_agency_letterhead_with_misread_licence_number_is_not_a_trade_licence():
+    page = make_page([
+        "Govt. Approved Translation Reg. No.: 27",
+        "Trade License No.: D60631",  # OCR read the 0 as D
+        "TRANSLATED TRUE COPY",
+        "Office Order",
+        "The following students are directed to undergo training.",
+    ])
+    assert classify_page(page, TODAY).kind is not PageKind.TRADE_LICENSE
+
+
+def test_personal_statement_mentioning_ielts_is_not_a_language_test():
+    page = make_page([
+        "I achieved Level 1 in the 102nd TOPIK I examination in October 2025.",
+        "I also obtained an overall IELTS score of 6.5 in January 2026.",
+    ])
+    assert classify_page(page, TODAY).kind is PageKind.IGNORED
+
+
+def test_ielts_test_report_form_is_a_language_test():
+    page = make_page(["IELTS", "Test Report Form", "Candidate Number 123456", "Overall Band Score 6.5"])
+    assert classify_page(page, TODAY).kind is PageKind.LANGUAGE_TEST

@@ -149,6 +149,9 @@ NID_TRANSLATION_RE = re.compile(
 SINGLE_PAGE_NO_TRANSLATION = 0.6
 
 
+_TRANSLATOR_BLOCK = re.compile(r"\btrue\s*copy\b|\btranslated\s*by\b", re.IGNORECASE)
+
+
 def _translation_pages(group: PageGroup) -> list[PageReading]:
     """Pages that are the separate translation of the card: they carry a translation marker.
 
@@ -156,6 +159,10 @@ def _translation_pages(group: PageGroup) -> list[PageReading]:
     result is empty (the card page is never also read as the translation).
     """
     marked = [p for p in group.pages if NID_TRANSLATION_RE.search(p.line_text) or NID_TRANSLATION_RE.search(p.block_text)]
+    if len(marked) == len(group.pages):
+        # The agency's round stamp says 'Translation' on the card copy too; only the
+        # translation itself carries the translator's block.
+        marked = [p for p in marked if _TRANSLATOR_BLOCK.search(p.line_text) or _TRANSLATOR_BLOCK.search(p.block_text)]
     if not marked or len(marked) == len(group.pages):
         return []
     return marked
@@ -525,6 +532,9 @@ def nid(group: PageGroup, doc_id: str) -> m.NationalId:
     if mrz is not None:
         page_no = _mrz_page(group, mrz)
         name = _agree_with_mrz(name, mrz.full_name)
+        if name.confidence < AGREE_CAP:  # e.g. a stamp's text taken for the name on the card copy
+            whole = _agree_with_mrz(_name(group, [OWN_NAME]), mrz.full_name)
+            name = whole if whole.confidence >= AGREE_CAP else name
         number_on_card = derived(mrz.document_number or None, _mrz_conf(mrz, "document_number"), page_no)
         dob = date_field(mrz.birth_date, _mrz_conf(mrz, "birth_date"), page_no)
     else:

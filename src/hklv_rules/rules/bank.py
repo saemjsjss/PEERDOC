@@ -85,9 +85,23 @@ def _bank_02_account(s: BankSolvency, statements: list[BankStatement], ctx: Eval
         return result(Outcome.FLAG, "account number not found, so it can't be compared with the statement")
     mine = _usable_number(s.account_number, ctx)
     if mine is None:
+        # A misread can't land exactly on the statement's (reliably read) long account number.
+        shaky = digits(s.account_number.value)
+        exact = [st for st in statements if len(shaky) >= 8 and _usable_number(st.account_number, ctx) == shaky]
+        if exact:
+            return result(
+                Outcome.PASS,
+                f"account number {shaky} (low OCR confidence) matches Bank Statement {exact[0].doc_id} exactly",
+            )
         return result(Outcome.FLAG, f"account number '{s.account_number.value}' read with low OCR confidence")
 
-    matched = [st for st in statements if _usable_number(st.account_number, ctx) == mine]
+    # an exact match also confirms a statement number read with low confidence
+    exact_ok = len(mine) >= 8
+    matched = [
+        st
+        for st in statements
+        if _usable_number(st.account_number, ctx) == mine or (exact_ok and digits(st.account_number.value) == mine)
+    ]
     if matched:
         return result(Outcome.PASS, f"account number {mine} matches Bank Statement {matched[0].doc_id}")
 

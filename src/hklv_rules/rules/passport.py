@@ -21,7 +21,7 @@ from datetime import date
 
 from ..context import EvaluationContext
 from ..models import Extracted, Outcome, Passport, RuleResult, worst
-from ..names import same_name
+from ..names import mrz_name_matches
 from ._evidence import ev
 from ._shared import add_months
 
@@ -122,12 +122,13 @@ def _expiry_agreement(p: Passport, ctx: EvaluationContext) -> tuple[Outcome, str
 def _names(p: Passport, ctx: EvaluationContext) -> tuple[Outcome, str]:
     printed = _joined("printed name", (p.given_names, p.surname), ctx)
     mrz = _joined("MRZ name", (p.mrz_given_names, p.mrz_surname), ctx)
-    problems = [problem for _, problem in (printed, mrz) if problem]
+    (printed_name, printed_problem), (mrz_name, mrz_problem) = printed, mrz
+    if printed_name and mrz_name and not mrz_problem and mrz_name_matches(mrz_name, printed_name):
+        # a reliable MRZ that agrees is a second reading: it confirms a low-confidence print
+        return Outcome.PASS, f"printed name '{printed_name}' matches MRZ name '{mrz_name}'"
+    problems = [problem for problem in (printed_problem, mrz_problem) if problem]
     if problems:
         return Outcome.FLAG, f"{' and '.join(problems)}, so printed and MRZ names can't be confirmed to match"
-    printed_name, mrz_name = printed[0], mrz[0]
-    if same_name(printed_name, mrz_name):
-        return Outcome.PASS, f"printed name '{printed_name}' matches MRZ name '{mrz_name}'"
     return Outcome.FLAG, f"printed name '{printed_name}' does not match MRZ name '{mrz_name}'"
 
 
@@ -137,8 +138,9 @@ def _joined(label: str, parts: tuple[Extracted[str], ...], ctx: EvaluationContex
     found = [x for x in parts if x.found and x.value.strip()]
     if not found:
         return "", f"{label} not found"
+    joined = " ".join(x.value.strip() for x in found)
     if any(not x.is_reliable(ctx.threshold) for x in found):
-        return "", f"{label} read with low OCR confidence"
-    return " ".join(x.value.strip() for x in found), None
+        return joined, f"{label} read with low OCR confidence"
+    return joined, None
 
 

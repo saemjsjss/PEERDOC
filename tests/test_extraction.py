@@ -211,6 +211,14 @@ def test_every_page_marked_means_no_separate_translation_page():
     assert nid(g, "nid-1").number_on_translation.value is None
 
 
+def test_agency_stamp_on_the_card_copy_does_not_hide_the_translation():
+    # Translation agencies stamp 'Govt. Approved Translation' on the card copy as well.
+    translation = make_page(["TRANSLATED TRUE COPY", "National ID Card", "NID No", "555 123 4567"], page_no=1)
+    card = make_page(["Govt. Approved Translation Reg. No-27", "NATIONAL ID CARD", "Name", "RAHIMA BEGUM", *td1()], page_no=2)
+    (g,) = groups_for(translation, card)
+    assert nid(g, "nid-1").number_on_translation.value == "5551234567"
+
+
 @pytest.mark.parametrize("marker", ["Translated True Copy", "Authorized to translate", "TrueCopy", "English Version"])
 def test_translation_markers_make_a_translation_page(marker):
     translation = make_page(["Notary Public", marker, "National ID Card", "NID No: 5551234567"], page_no=1)
