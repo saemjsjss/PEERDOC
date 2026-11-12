@@ -2,7 +2,8 @@
 
 The TIN Taxpayer and the holder of the income document must be the same parent. The
 income document is the Trade License or, instead of it, an Employment Certificate
-(REQ-06). Bank documents are deliberately NOT part of this chain.
+(REQ-06). RULES-v6 adds the bank: every Bank Solvency's account holder must be that same
+parent too (CHAIN-04).
 
 Overlaps removed 2026-11-12: CHAIN-01 (TIN name == income-document name) was the same check
 as TIN-03, and the income document being the student's is TRADE-04 / EMP-05's job, so
@@ -13,12 +14,21 @@ from __future__ import annotations
 
 from ..context import EvaluationContext
 from ..identity import Identification, IdStatus, identify
-from ..models import EmploymentCertificate, Extracted, Outcome, Person, RuleResult, TinCertificate, TradeLicense
+from ..models import (
+    BankSolvency,
+    EmploymentCertificate,
+    Extracted,
+    Outcome,
+    Person,
+    RuleResult,
+    TinCertificate,
+    TradeLicense,
+)
 from ..models.common import Frozen
 from ..names import normalize_name
 from ._evidence import ev
 
-CHAIN_02, CHAIN_03 = "CHAIN-02", "CHAIN-03"
+CHAIN_02, CHAIN_03, CHAIN_04 = "CHAIN-02", "CHAIN-03", "CHAIN-04"
 _PARENTS = (Person.FATHER, Person.MOTHER)
 
 
@@ -49,8 +59,12 @@ class _Income(Frozen):
 
 
 def check_financial_chain(ctx: EvaluationContext) -> list[RuleResult]:
-    tins = ctx.case.of_kind(TinCertificate)
     incomes = [_Income.of(d) for d in [*ctx.case.of_kind(TradeLicense), *ctx.case.of_kind(EmploymentCertificate)]]
+    return [*_tin_chain(ctx, incomes), *_bank_chain(ctx, incomes)]
+
+
+def _tin_chain(ctx: EvaluationContext, incomes: list[_Income]) -> list[RuleResult]:
+    tins = ctx.case.of_kind(TinCertificate)
 
     gap = _structural_problem(tins, incomes)
     if gap is not None and gap[0] is Outcome.FAIL:
@@ -196,3 +210,52 @@ def _chain_03(tin: Identification, evidence) -> RuleResult:
     if tin.status in (IdStatus.AMBIGUOUS, IdStatus.UNCERTAIN):
         return result(Outcome.FLAG, f"Could not rule out the student's name: TIN: {tin.reason}")
     return result(Outcome.PASS, "TIN is not in the student's name")
+
+
+# --- CHAIN-04 Bank account holder (RULES-v6) -------------------------------------
+
+
+def _bank_chain(ctx: EvaluationContext, incomes: list[_Income]) -> list[RuleResult]:
+    """One result per Bank Solvency: its account holder and the income document's holder
+    must be the same parent. A missing link FAILs (REQ-05 / REQ-06 say which); several
+    income documents or an unsure name FLAG; a name that reliably matches no parent, or
+    two different parents, FAIL."""
+    solvencies = ctx.case.of_kind(BankSolvency)
+    if not solvencies or not incomes:
+        missing = [label for label, docs in (("Bank Solvency", solvencies), ("Trade License or Employment Certificate", incomes)) if not docs]
+        return [RuleResult(rule_id=CHAIN_04, outcome=Outcome.FAIL, reason=f"Bank account holder cannot be compared: no {' and no '.join(missing)}")]
+    return [_chain_04(s, incomes, ctx) for s in solvencies]
+
+
+def _chain_04(s: BankSolvency, incomes: list[_Income], ctx: EvaluationContext) -> RuleResult:
+    evidence = (ev(s.doc_id, "account_holder", s.account_holder), *(ev(i.doc_id, i.field, i.name) for i in incomes))
+
+    def result(outcome: Outcome, reason: str) -> RuleResult:
+        return RuleResult(rule_id=CHAIN_04, outcome=outcome, reason=f"Bank Solvency {s.doc_id}: {reason}", evidence=evidence)
+
+    if len(incomes) > 1:
+        return result(Outcome.FLAG, "more than one Trade License / Employment Certificate; reviewer must pick which one the bank account must match")
+    income = incomes[0]
+    links = (("account holder", s.account_holder), (f"{income.describe}", income.name))
+    unreadable = [
+        f"{label} '{n.value}' read with low OCR confidence" if n.found else f"{label} not found by OCR"
+        for label, n in links
+        if not n.is_reliable(ctx.threshold) or not normalize_name(n.value)
+    ]
+    ids = [(label, identify(n, ctx)) for label, n in links if n.is_reliable(ctx.threshold) and normalize_name(n.value)]
+    strangers = [f"{label} matches no parent ({i.reason})" for label, i in ids if i.status is IdStatus.UNKNOWN]
+    students = [f"{label} is in the student's name" for label, i in ids if i.status is IdStatus.IDENTIFIED and i.person is Person.STUDENT]
+    if strangers or students:
+        return result(Outcome.FAIL, "; ".join(students + strangers) + "; both must be the same parent")
+    if unreadable:
+        return result(Outcome.FLAG, "; ".join(unreadable))
+    (_, bank), (_, owner) = ids
+    if bank.status is IdStatus.IDENTIFIED and owner.status is IdStatus.IDENTIFIED:
+        if bank.person is owner.person:
+            return result(Outcome.PASS, f"account holder and {income.label} {income.holder} are both the {_label(bank)}")
+        return result(
+            Outcome.FAIL,
+            f"account holder is the {_label(bank)} but the {income.describe} is the {_label(owner)}; both must be the same parent",
+        )
+    unsure = [f"{label}: {i.reason}" for label, i in ids if i.status is not IdStatus.IDENTIFIED]
+    return result(Outcome.FLAG, "could not confirm the same parent: " + "; ".join(unsure))

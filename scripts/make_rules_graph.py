@@ -27,6 +27,7 @@ MANUAL_EDGES = [
     (APOSTILLE, "ACAD-01"), (CHALLAN, "TAX-04"),
     ("NID-ASSIGN", "REQ-08"), ("NID-ASSIGN", "REQ-09"),
     ("TIN-03", "CHAIN-02"), ("TRADE-04", "CHAIN-02"), ("EMP-05", "CHAIN-02"),
+    ("TRADE-04", "CHAIN-04"), ("EMP-05", "CHAIN-04"), ("BANK-01", "CHAIN-04"),  # RULES-v6
 ]
 
 
@@ -122,7 +123,8 @@ def build(text: str) -> dict:
             edges.update((src, node["id"]) for src in group if src in nodes)
     # TAX-01 names TAX-03..04 because it gates them, so the arrow runs the other way.
     edges = {(t, s) if t == "TAX-01" else (s, t) for s, t in edges}
-    edges.update(MANUAL_EDGES)
+    # a hand-listed link only where both rules exist in this version (CHAIN-04 is v6+)
+    edges.update((s, t) for s, t in MANUAL_EDGES if s in nodes and t in nodes)
     # 5.2 covers every name-matching rule: anything an identity anchor feeds, plus TIN-03.
     name_rules = {t for s, t in edges if s in ANCHORS} | {"TIN-03"}
     edges.update((AFFIDAVIT, t) for t in name_rules)

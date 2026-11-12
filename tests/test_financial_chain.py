@@ -1,13 +1,19 @@
-"""Section 5.1 financial chain: TIN taxpayer and Trade License owner must be the same parent."""
+"""Section 5.1 financial chain: TIN taxpayer, Trade License owner and (RULES-v6) bank account
+holder must be the same parent."""
 
-from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, by_rule, context, tin, trade
+from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, bank_solvency, by_rule, context, employment, tin, trade
 
 from hklv_rules.models import BankSolvency, Outcome, Person, overall
 from hklv_rules.rules import check_financial_chain
 
 
 def run(*docs, **kw):
-    return by_rule(check_financial_chain(context(*docs, **kw)))
+    """CHAIN-02/03 only; CHAIN-04 (the bank link) has its own tests below."""
+    return by_rule(r for r in check_financial_chain(context(*docs, **kw)) if r.rule_id != "CHAIN-04")
+
+
+def chain04(*docs, **kw):
+    return [r for r in check_financial_chain(context(*docs, **kw)) if r.rule_id == "CHAIN-04"]
 
 
 def test_tin_father_and_trade_father_passes():
@@ -106,10 +112,53 @@ def test_two_trade_licenses_flag():
     assert {v.outcome for v in r.values()} == {Outcome.FLAG}
 
 
-def test_bank_is_excluded_from_chain():
+def test_bank_does_not_change_chain_02_or_03():
     student_bank = BankSolvency(doc_id="bank")
     r = run(tin(FATHER), trade(FATHER), student_bank)
     assert overall(r.values()) is Outcome.PASS
+
+
+# --- CHAIN-04: bank account holder = trade licence owner (RULES-v6) ---------------
+
+
+def test_bank_holder_same_parent_as_trade_owner_passes():
+    [r] = chain04(trade(FATHER), bank_solvency(holder=FATHER))
+    assert r.outcome is Outcome.PASS
+    assert "Father" in r.reason
+
+
+def test_bank_holder_other_parent_fails():
+    [r] = chain04(trade(FATHER), bank_solvency(holder=MOTHER))
+    assert r.outcome is Outcome.FAIL
+    assert "account holder is the Mother but the Trade License owner is the Father" in r.reason
+
+
+def test_bank_in_student_name_fails():
+    [r] = chain04(trade(FATHER), bank_solvency(holder=STUDENT))
+    assert r.outcome is Outcome.FAIL
+
+
+def test_low_confidence_bank_holder_flags():
+    [r] = chain04(trade(FATHER), bank_solvency(holder=FATHER, confidence=LOW))
+    assert r.outcome is Outcome.FLAG
+    assert "low OCR confidence" in r.reason
+
+
+def test_employment_certificate_is_the_income_link_too():
+    [r] = chain04(employment(MOTHER), bank_solvency(holder=MOTHER))
+    assert r.outcome is Outcome.PASS
+
+
+def test_one_result_per_solvency_and_missing_links_fail():
+    rs = chain04(trade(FATHER), bank_solvency(holder=FATHER, doc_id="b1"), bank_solvency(holder=MOTHER, doc_id="b2"))
+    assert [r.outcome for r in rs] == [Outcome.PASS, Outcome.FAIL]
+    [r] = chain04(trade(FATHER))
+    assert r.outcome is Outcome.FAIL and "no Bank Solvency" in r.reason
+
+
+def test_two_income_documents_flag():
+    [r] = chain04(trade(FATHER, doc_id="t1"), trade(FATHER, doc_id="t2"), bank_solvency(holder=FATHER))
+    assert r.outcome is Outcome.FLAG
 
 
 def test_uncertain_father_anchor_flags():

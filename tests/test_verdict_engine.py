@@ -3,11 +3,22 @@
 import itertools
 
 import pytest
-from builders import FATHER, MOTHER, case_file, complete_case_documents, death, employment, tin, trade
+from builders import (
+    FATHER,
+    MOTHER,
+    bank_solvency,
+    bank_statement,
+    case_file,
+    complete_case_documents,
+    death,
+    employment,
+    tin,
+    trade,
+)
 
 from hklv_rules.engine import COVERAGE_RULE, NOT_YET_IMPLEMENTED, evaluate_case, final_verdict, run_all_rules
 from hklv_rules.context import EvaluationContext
-from hklv_rules.models import NationalId, Outcome, RuleResult, TinCertificate, TradeLicense
+from hklv_rules.models import BankSolvency, BankStatement, NationalId, Outcome, RuleResult, TinCertificate, TradeLicense
 
 P, G, F = Outcome.PASS, Outcome.FLAG, Outcome.FAIL
 
@@ -123,9 +134,12 @@ def test_deceased_father_with_death_certificate_and_employed_mother():
     docs = [
         d
         for d in complete_case_documents()
-        if not isinstance(d, (TinCertificate, TradeLicense)) and getattr(d, "doc_id", "") != "n-father"
+        if not isinstance(d, (TinCertificate, TradeLicense, BankSolvency, BankStatement))
+        and getattr(d, "doc_id", "") != "n-father"
     ]
-    v = evaluate_case(case_file(*docs, death(FATHER), tin(MOTHER), employment(MOTHER)))
+    # the whole chain is the mother's: TIN, employment and (CHAIN-04) the bank account
+    bank = (bank_solvency(holder=MOTHER), bank_statement(holder=MOTHER))
+    v = evaluate_case(case_file(*docs, death(FATHER), tin(MOTHER), employment(MOTHER), *bank))
     assert outcomes_without_coverage(v) == {P}, [x for x in v.results if x.outcome is not P]
 
 

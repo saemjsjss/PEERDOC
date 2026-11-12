@@ -75,6 +75,7 @@ const TITLES: Record<string, string> = {
   'TIN-03': 'Taxpayer is the trade licence owner',
   'CHAIN-02': 'TIN and trade licence belong to the same parent',
   'CHAIN-03': 'TIN is not in the student’s name',
+  'CHAIN-04': 'Bank account holder is the trade licence owner (same parent)',
   'ACAD-01': 'e-Apostille verified on the official register',
   'ACAD-02': 'Certificate and transcript for each level',
   'ACAD-03': 'Valid equivalency track (e.g. SSC + HSC)',
