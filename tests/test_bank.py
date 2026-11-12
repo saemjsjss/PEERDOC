@@ -163,9 +163,16 @@ def test_low_confidence_number_that_differs_flags():
     assert run(sol, bank_statement())["BANK-02"].outcome is Outcome.FLAG
 
 
-def test_both_numbers_low_confidence_flags_even_if_equal():
+def test_both_numbers_low_confidence_pass_when_equal_digit_for_digit():
+    # RULES-v3: two documents can't both be misread onto the same 8+ digit number
     sol = bank_solvency().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
     st = bank_statement().model_copy(update={"account_number": ex(ACCOUNT_NUMBER, LOW)})
+    assert run(sol, st)["BANK-02"].outcome is Outcome.PASS
+
+
+def test_both_short_numbers_low_confidence_still_flag():
+    sol = bank_solvency().model_copy(update={"account_number": ex("1234567", LOW)})
+    st = bank_statement().model_copy(update={"account_number": ex("1234567", LOW)})
     assert run(sol, st)["BANK-02"].outcome is Outcome.FLAG
 
 

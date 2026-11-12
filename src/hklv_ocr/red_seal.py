@@ -12,6 +12,7 @@ MIN_DIAMETER = 0.18  # of the shorter page side; foil seals measure ~0.25, a rou
 MIN_FILL = 0.65  # red share of the seal's bounding box: a disc fills 0.785, cut or not (real seals: 0.74-0.81)
 MAX_FILL = 0.95  # a solid red rectangle is a printed bar, not a seal
 EDGE_PX = 0.01  # within this share of the page side counts as touching the edge
+OPEN_SIZE = 0.06  # thinner red shapes (frames, rules, bars) are not part of a seal
 
 
 def find_red_seals(bgr) -> list[tuple[Box, float]]:
@@ -26,6 +27,10 @@ def find_red_seals(bgr) -> list[tuple[Box, float]]:
     # close the embossed texture and the serrated rim into one blob
     k = max(3, int(min(h, w) * 0.01))
     red = cv2.morphologyEx(red, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
+    # keep only shapes thicker than OPEN_SIZE: a certificate's red frame (~3% thick) or a
+    # header bar touching the seal would join it into one shape that isn't a disc
+    t = max(3, int(min(h, w) * OPEN_SIZE))
+    red = cv2.morphologyEx(red, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (t, t)))
     count, _, stats, _ = cv2.connectedComponentsWithStats(red, connectivity=8)
     side, edge = min(h, w), int(min(h, w) * EDGE_PX)
     found = []

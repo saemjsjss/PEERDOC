@@ -137,6 +137,22 @@ def find_labeled(
     return None
 
 
+def line_under(page: PageReading, label: str) -> tuple[TextLine, TextLine] | None:
+    """(label line, the line right under it in its column, within two line heights)."""
+    label_re = re.compile(label, re.IGNORECASE)
+    for ln in page.lines:
+        if not label_re.search(ln.text):
+            continue
+        h = ln.box[3] - ln.box[1]
+        under = [
+            o for o in page.lines
+            if not same_row(ln, o) and ln.box[3] - 5 <= o.box[1] <= ln.box[3] + 2 * h and min(o.box[2], ln.box[2]) > max(o.box[0], ln.box[0])
+        ]
+        if under:
+            return ln, min(under, key=lambda o: o.box[1])
+    return None
+
+
 def levenshtein(a: str, b: str, limit: int | None = None) -> int:
     if a == b:
         return 0

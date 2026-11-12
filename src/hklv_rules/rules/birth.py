@@ -1,6 +1,7 @@
 """Rulebook v2.5 section 4.3: Birth Certificate (BIRTH-01 .. BIRTH-04).
 
   * BIRTH-01 (Format): if Bangla, must have an English translation. Missing -> FAIL.
+    A bilingual certificate whose English side gives name, DOB, father and mother passes (RULES-v3).
   * BIRTH-02 (Notary): must be notarised. Missing -> FAIL.
   * BIRTH-03 (DOB): must match the Passport DOB, else FAIL. A Bangla certificate with an
     English translation is checked on the birth year only (agreed 2026-11-12).
@@ -20,7 +21,7 @@ from datetime import date
 
 from ..context import EvaluationContext
 from ..identity import MatchKind, compare_name
-from ..models import BirthCertificate, Outcome, Passport, Person, RuleResult
+from ..models import BirthCertificate, Language, Outcome, Passport, Person, RuleResult
 from ._evidence import ev
 from ..names import normalize_name
 from ._shared import digits, edit_distance, notary_rule, translation_rule
@@ -56,8 +57,25 @@ def _named(result: RuleResult, cert: BirthCertificate) -> RuleResult:
 # --- BIRTH-01 Format / BIRTH-02 Notary -------------------------------------------------
 
 
+_ENGLISH_SIDE = ("name", "date_of_birth", "father_name", "mother_name")
+
+
 def _birth_01_format(cert: BirthCertificate, ctx: EvaluationContext) -> RuleResult:
-    return _named(translation_rule(BIRTH_01, cert.doc_id, cert.language, cert.has_english_translation, ctx), cert)
+    result = translation_rule(BIRTH_01, cert.doc_id, cert.language, cert.has_english_translation, ctx)
+    # RULES-v3: a bilingual certificate (BDRIS) whose English side gives every needed field
+    # needs no translation page.
+    bilingual = cert.language.is_reliable(ctx.threshold) and cert.language.value is Language.MIXED
+    if result.outcome is Outcome.FLAG and bilingual and ctx.tri_state(cert.has_english_translation) is not True:
+        fields = {f: getattr(cert, f) for f in _ENGLISH_SIDE}
+        if all(v.is_reliable(ctx.threshold) for v in fields.values()):
+            result = result.model_copy(
+                update={
+                    "outcome": Outcome.PASS,
+                    "reason": "Bilingual certificate: the English side gives the name, date of birth, father and mother",
+                    "evidence": result.evidence + tuple(ev(cert.doc_id, f, v) for f, v in fields.items()),
+                }
+            )
+    return _named(result, cert)
 
 
 def _birth_02_notary(cert: BirthCertificate, ctx: EvaluationContext) -> RuleResult:

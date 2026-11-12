@@ -90,7 +90,14 @@ SIG = {
     "tin": _rx(r"TAXPAYER'?S?\s*IDENTIFICATION\s*NUMBER", r"\bTIN\s*CERTIFICATE\b"),
     "nbr": _rx(r"NATIONAL\s*BOARD\s*OF\s*REVENUE", r"\bNBR\b"),
     # Also the licence's own verification QR (decoded by ZXing), e.g. ".../verify/trade_bn/...".
-    "trade": _rx(r"TRADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E", r"ট্রেড\s*লাইসেন্স", r"/verify/trade"),
+    # Union Parishads also title it "Professional Licence" (RULES-v3).
+    "trade": _rx(
+        r"TRADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E",
+        r"PROFESSIONAL\s*LICEN[CS]E",
+        r"NAME\s*OF\s*LICEN[CS]ES?\s*HOLDER",
+        r"ট্রেড\s*লাইসেন্স",
+        r"/verify/trade",
+    ),
     "employment": _rx(r"EMPLOYMENT\s*CERTIFICATE", r"EXPERIENCE\s*CERTIFICATE", r"\bIS\s+(?:WORKING|EMPLOYED|SERVING)\b"),
     "solvency": _rx(r"\bSOLVENCY\b", r"ACCOUNT\s*HOLDER"),
     "to_whom": _rx(r"TO\s*WHOM\s*IT\s*MAY\s*CONCERN"),

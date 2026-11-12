@@ -422,3 +422,70 @@ def test_dot_read_as_a_comma_in_a_date():
     assert find_dates("Date:25.10,2026") == [date(2026, 10, 25)]
     assert find_dates("Ward 8, 2, 1902") == []
 
+
+# --- APU RIAD HASAN (2026-11-12, RULES-v3) ---------------------------------------------------
+
+
+def test_union_parishad_professional_licence_is_a_trade_licence():
+    from hklv_extract.extractors import trade_license
+
+    page = make_page([
+        "03No Amjhupi Union Parishad",
+        "Financial Year: 2026-2027",
+        "Licence No: 332  Professional Licence  Date: 08-09-2026",
+        "Name of Licences Holder : MD. MOSTAFIZUR RAHAMAN",
+    ])
+    assert classify_page(page, TODAY).kind is PageKind.TRADE_LICENSE
+    assert trade_license(_group(PageKind.TRADE_LICENSE, page), "t").owner_name.value == "MD. MOSTAFIZUR RAHAMAN"
+
+
+@pytest.mark.parametrize(
+    "cell,name",
+    [
+        ("RIAD HASAN APU. NID NO: 8729747587", "RIAD HASAN APU"),
+        ("MD MEHRAB SIAM. DOB-20057187191", "MD MEHRAB SIAM"),
+        ("NIDA KHAN", "NIDA KHAN"),
+    ],
+)
+def test_frc_member_id_is_cut_from_the_name_cell(cell, name):
+    from hklv_extract.extractors import _CELL_ID
+
+    assert _CELL_ID.sub("", cell) == name
+
+
+@pytest.mark.parametrize("father,expected", [("MD. KAMAL UDDIN", Outcome.PASS), (None, Outcome.FLAG)])
+def test_bilingual_birth_certificate_passes_when_its_english_side_is_complete(father, expected):
+    from builders import birth_certificate, ex
+    from hklv_rules.models import Extracted, Language
+    from hklv_rules.rules import check_birth_certificates
+
+    cert = birth_certificate(language=Language.MIXED, translated=False)
+    if father is None:
+        cert = cert.model_copy(update={"father_name": Extracted()})
+    else:
+        cert = cert.model_copy(update={"father_name": ex(father)})
+    results = check_birth_certificates(context(cert, with_identity_docs=False))
+    assert by_rule(results)["BIRTH-01"].outcome is expected
+
+
+def test_bdris_registration_number_under_its_heading():
+    from hklv_ocr.reading import TextLine
+
+    page = make_page(["x"]).model_copy(update={"lines": (
+        TextLine(text="Birth Registration Number", score=1.0, box=(893, 944, 1555, 1003)),
+        TextLine(text="Date of Issuance", score=1.0, box=(1810, 945, 2113, 989)),
+        TextLine(text="BANGU", score=0.5, box=(171, 988, 258, 1027)),
+        TextLine(text="04/03/2017", score=1.0, box=(232, 1015, 434, 1055)),
+        TextLine(text="20075718719106516", score=1.0, box=(960, 1007, 1483, 1061)),
+        TextLine(text="Date of Birth : 31/12/2007", score=1.0, box=(171, 1150, 900, 1200)),
+    )})
+    brn = birth_certificate(_group(PageKind.BIRTH_CERTIFICATE, page), "b").registration_number
+    assert brn.value == "20075718719106516" and brn.is_reliable(0.9)
+
+
+@pytest.mark.parametrize("label", ["ame of Student : Riad Hasan Apu", "Name of Srudent : Riad Hasan Apu", "This is to certifg that Riad Hasan Apu"])
+def test_student_name_despite_ocr_slips_in_the_label(label):
+    from hklv_extract.extractors import academic_transcript
+
+    page = make_page(["BOARD OF INTERMEDIATE AND SECONDARY EDUCATION", label])
+    assert academic_transcript(_group(PageKind.ACADEMIC_TRANSCRIPT, page), "t").student_name.value == "Riad Hasan Apu"

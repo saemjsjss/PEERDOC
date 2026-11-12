@@ -23,7 +23,7 @@ from .confidence import AGREE_CAP, DISAGREE, MRZ_INVALID, MRZ_VALID, SINGLE_READ
 from .dates import has_month_name, parse_amount_words, parse_boxed_date, parse_date, parse_words_date
 from .group import PageGroup
 from .mrz import MrzResult
-from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labeled, levenshtein, reading_order, same_row, squash
+from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labeled, levenshtein, line_under, reading_order, same_row, squash
 
 NAME = r"[A-Za-z][A-Za-z .\-']{1,60}"
 # Labels that often follow a name on the same printed line.
@@ -572,6 +572,13 @@ _BRN_VALUE_V1 = r"\d[\d ]{15,20}\d"
 
 
 def _registration_number(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[str]:
+    # BDRIS: the number centred right under its "Birth Registration Number" heading, with
+    # "Date of Issuance" beside the heading and stamp text to the left read first.
+    for p in pages:
+        hit = line_under(p, r"^\W*Birth\s*Registration\s*Number\W*$")
+        if hit and re.fullmatch(BRN_VALUE, hit[1].text.strip()):
+            label, value = hit
+            return text_field(Found(_compact(value.text), min(label.score, value.score), p.page_no), p)
     brn = _text(group, _BRN_LABELS_V1, _BRN_VALUE_V1, pages=pages)
     if brn.value is not None:
         return brn
@@ -683,6 +690,9 @@ def _birth_date(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[dat
     return dob
 
 
+_BARE_PARENT = r"\b{}\b(?!'|’|\s*s\b|\s*(?:Name|Nationality|NID|BRN))"
+
+
 def birth_certificate(group: PageGroup, doc_id: str) -> m.BirthCertificate:
     english = [p for p in group.pages if page_language(p).value == "ENGLISH"] or group.pages
     return m.BirthCertificate(
@@ -692,8 +702,9 @@ def birth_certificate(group: PageGroup, doc_id: str) -> m.BirthCertificate:
         name=_name(group, [r"Name\s*of\s*(?:the\s*)?Child", OWN_NAME], pages=english),
         date_of_birth=_birth_date(group, english),
         # Small print on old forms reads as 'Fathar's' / 'Motfiar's': a few letters may differ.
-        father_name=_name(group, [r"\bFa[a-z]{2,3}r'?s?\s*Name"], pages=english),
-        mother_name=_name(group, [r"\bMo[a-z]{2,4}r'?s?\s*Name"], pages=english),
+        # The bilingual BDRIS form prints a bare "Father :" / "Mother :" (not "Father's Nationality").
+        father_name=_name(group, [r"\bFa[a-z]{2,3}r'?s?\s*Name", _BARE_PARENT.format("Father")], pages=english),
+        mother_name=_name(group, [r"\bMo[a-z]{2,4}r'?s?\s*Name", _BARE_PARENT.format("Mother")], pages=english),
         language=document_language(group.pages),
         has_english_translation=has_translation(group.pages),
         notary=_notary(group),
@@ -743,6 +754,11 @@ def _rows_the_table_reader_missed(group: PageGroup, members: list[m.FrcMember]) 
     return [m.FrcMember(relation=Extracted[str](value=key, confidence=VL_ONLY)) for key in missed]
 
 
+# Some councils put the member's ID in the name cell: "RIAD HASAN APU. NID NO: 8729747587",
+# "MD MEHRAB SIAM. DOB-2005...". The name is what comes before it.
+_CELL_ID = re.compile(r"[.,;]?\s*\b(?:NID|DOB|D\.O\.B|BRN|BIRTH\s*REG(?:ISTRATION)?)\b.*$", re.IGNORECASE | re.DOTALL)
+
+
 def frc(group: PageGroup, doc_id: str) -> m.FamilyRelationshipCertificate:
     from .classify import SIG
 
@@ -769,7 +785,7 @@ def frc(group: PageGroup, doc_id: str) -> m.FamilyRelationshipCertificate:
                 dob = parse_date(row[dob_col]) if dob_col is not None and dob_col < len(row) else None
                 members.append(
                     m.FrcMember(
-                        name=_table_field(page, row[name_col]),
+                        name=_table_field(page, _CELL_ID.sub("", row[name_col])),
                         relation=_table_field(page, row[rel_col]),
                         date_of_birth=date_field(dob, _table_field(page, row[dob_col]).confidence, page.page_no) if dob else Extracted[date](),
                     )
@@ -980,7 +996,7 @@ def trade_license(group: PageGroup, doc_id: str) -> m.TradeLicense:
         doc_id=doc_id,
         pages=group.page_nos,
         license_number=_text(group, [r"Licen[cs]e\s*(?:No|Number)\.?", r"Trade\s*Licen[cs]e\s*(?:No|Number)\.?"], r"[A-Z0-9/\-]*\d{6,}[A-Z0-9/\-]*", pages=english),
-        owner_name=_name(group, [r"Name\s*of\s*(?:the\s*)?(?:Proprietor|Owner)(?:\s*/\s*Assessee)?", r"Proprietor'?s?\s*Name", r"Owner'?s?\s*Name"], pages=english),
+        owner_name=_name(group, [r"Name\s*of\s*(?:the\s*)?(?:Proprietor|Owner)(?:\s*/\s*Assessee)?", r"Proprietor'?s?\s*Name", r"Owner'?s?\s*Name", r"Name\s*of\s*Licen[cs]es?\s*Holder"], pages=english),
         fiscal_year=text_field(*fy) if fy else Extracted[str](),
         language=document_language(group.pages),
         has_english_translation=has_translation(group.pages),
@@ -1228,13 +1244,14 @@ def _level(group: PageGroup) -> Extracted:
 
 
 def _student_name(group: PageGroup) -> Extracted[str]:
-    labelled = _name(group, [r"Name\s*of\s*(?:the\s*)?(?:Student|Candidate)", r"Student'?s?\s*Name", r"Candidate'?s?\s*Name"])
+    # OCR slips seen on stamped pages: "ame of Student" (N cut off), "Name of Srudent".
+    labelled = _name(group, [r"N?ame\s*of\s*(?:the\s*)?(?:S\w?udent|Candidate)", r"Student'?s?\s*Name", r"Candidate'?s?\s*Name"])
     if labelled.value is not None:
         return labelled
     # Certificates: "This is to Certify that <name>" with the name on the same or next line.
     for page in group.pages:
         for ln in reading_order(page.lines):
-            mt = re.search(r"certify\s+that\s*(.*)$", ln.text, re.IGNORECASE)
+            mt = re.search(r"certif[yg]\s+that\s*(.*)$", ln.text, re.IGNORECASE)  # 'certifg': y read as g
             if not mt:
                 continue
             candidate = clean_value(mt.group(1))
@@ -1267,15 +1284,13 @@ def _certificate_dob(group: PageGroup) -> Extracted[date]:
         for ln in reading_order(page.lines):
             if not re.search(r"date\s*of\s*birth", ln.text, re.IGNORECASE):
                 continue
-            # The sentence wraps to lines starting at its left margin; a stamp's words beside
-            # it don't. As few lines as give a date.
+            # The sentence goes on right after it on its row, then wraps to lines starting at its
+            # left margin; a stamp's words beside it don't. All of it: "Two Thousand" alone is
+            # already a valid year (2000) when "Seven" is on the next line.
             h = max(1, ln.box[3] - ln.box[1])
-            more = [o for o in _following(page.lines, ln) if abs(o.box[0] - ln.box[0]) < 3 * h][:2]
-            d, used = None, []
-            for n in range(len(more) + 1):
-                used = [ln, *more[:n]]
-                if (d := parse_words_date(" ".join(x.text for x in used))) is not None:
-                    break
+            more = [o for o in _following(page.lines, ln) if (same_row(ln, o) and o.box[0] - ln.box[2] < 2 * h) or abs(o.box[0] - ln.box[0]) < 3 * h][:2]
+            used = [ln, *more]
+            d = parse_words_date(" ".join(x.text for x in used))
             if d is None:
                 continue
             score = min(x.score for x in used)

@@ -29,3 +29,11 @@ def test_small_logo_red_text_and_red_bar_are_not_seals():
     cv2.rectangle(page, (0, 1000), (829, 1060), RED, -1)  # printed bar
     cv2.circle(page, (400, 800), 100, RED, 6)  # outline rubber stamp
     assert find_red_seals(page) == []
+
+
+def test_seal_touching_a_red_frame_is_found():
+    # a certificate's thick red border joined the seal into one shape that wasn't a disc
+    page = _page()
+    cv2.rectangle(page, (50, 130), (780, 980), RED, 25)
+    cv2.circle(page, (720, 1060), 105, RED, -1)
+    assert len(find_red_seals(page)) == 1
