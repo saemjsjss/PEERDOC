@@ -246,6 +246,7 @@ def academic_certificate(
         level=ex(level, confidence),
         student_name=ex(name, confidence),
         date_of_birth=_opt(dob, confidence),
+        notary=notarised(),
     )
 
 
@@ -261,6 +262,7 @@ def academic_transcript(
         pages=(page,),
         level=ex(level, confidence),
         student_name=ex(name, confidence),
+        notary=notarised(),
     )
 
 

@@ -52,3 +52,10 @@ def test_notary_info_stamp_follows_the_seal_text(seal_text, reliable):
     stamp = notary_info([page]).stamp_present
     assert stamp.value is True
     assert stamp.is_reliable(0.9) is reliable
+
+
+def test_red_foil_seal_counts_as_the_notary_stamp():
+    base = make_page(["Family Certificate", "Notary Public"])
+    foil = LayoutBlock(label="red_seal", box=(700, 270, 830, 480), score=0.75)
+    stamp = notary_info([base.model_copy(update={"blocks": (*base.blocks, foil)})]).stamp_present
+    assert stamp.value is True and stamp.is_reliable(0.9)

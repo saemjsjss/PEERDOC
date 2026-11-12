@@ -40,6 +40,8 @@ def notary_info(pages: Sequence[PageReading]) -> NotaryInfo:
         notary_text = Extracted[bool](value=False, confidence=NO_NOTARY_TEXT, source_page=pages[0].page_no)
 
     seals = [(p, b, _seal_confidence(p, b)) for p in pages for b in p.blocks if b.label == "seal"]
+    # A red foil seal (found by colour, even half cut off at the edge) is a notary's.
+    seals += [(p, b, SEAL_WITH_NOTARY_TEXT) for p in pages for b in p.blocks if b.label == "red_seal"]
     if seals:
         page, _, conf = max(seals, key=lambda s: s[2])
         stamp = Extracted[bool](value=True, confidence=round(conf, 4), source_page=page.page_no)

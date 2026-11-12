@@ -345,3 +345,80 @@ def test_personal_statement_mentioning_ielts_is_not_a_language_test():
 def test_ielts_test_report_form_is_a_language_test():
     page = make_page(["IELTS", "Test Report Form", "Candidate Number 123456", "Overall Band Score 6.5"])
     assert classify_page(page, TODAY).kind is PageKind.LANGUAGE_TEST
+
+
+@pytest.mark.parametrize(
+    "line_text,reliable",
+    [("HAS CONFERRED THE DEGREE OF", True), ("Result Published on 08 January 2025", False)],
+)
+def test_degree_under_the_notary_stamp_read_from_the_layout_text(line_text, reliable):
+    # The stamp hides "Bachelor of Science" from the line reader; the layout reader has it
+    # inside the stamp's block. Trusted only when the page confers a degree.
+    from hklv_extract.extractors import academic_certificate
+    from hklv_rules.models import AcademicLevel
+
+    page = make_page(
+        ["Daffodil International University", line_text, "& Food Engineering"],
+        vl_text="Notary Public\nBachelor of Science in Nutriti",
+    )
+    level = academic_certificate(PageGroup(kind=PageKind.ACADEMIC_CERTIFICATE, pages=(page,)), "c").level
+    assert level.value is AcademicLevel.BACHELOR
+    assert level.is_reliable(0.9) is reliable
+
+
+# --- sample doc 6 (2026-11-12) --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("with_death_certificate,expected", [(True, Outcome.PASS), (False, Outcome.FAIL)])
+def test_frc_deceased_father_named_as_late_needs_no_row(with_death_certificate, expected):
+    from builders import FATHER, death, ex
+
+    no_father = tuple(m for m in frc().members if m.relation.value != "FATHER")
+    cert = frc(members=no_father).model_copy(update={"late_names": (ex(FATHER),)})
+    docs = (cert, death()) if with_death_certificate else (cert,)
+    assert by_rule(check_frc(context(*docs)))["FRC-03"].outcome is expected
+
+
+def test_frc_late_name_is_read_up_to_the_ampersand():
+    from hklv_extract.extractors import frc as frc_extract
+
+    page = make_page(["TANGAIL POURASHAVA", "FAMILY CERTIFICATE", "is the son of Late Md", "Abdur Razzak & Rajea Akter and a resident"])
+    assert [n.value for n in frc_extract(_group(PageKind.FRC, page), "f").late_names] == ["Md Abdur Razzak"]
+
+
+def test_bangla_death_certificate_with_an_nid_row_is_a_death_certificate():
+    # The title banner is unreadable; the date / cause of death rows are plain text.
+    page = make_page(["জাতীয় পরিচয় পত্র নম্বর", "মৃত্যুর তারিখ : ০২-০৬-২০১৭", "মৃত্যুর কারণ : বার্ধক্য"])
+    assert classify_page(page, TODAY).kind is PageKind.DEATH_CERTIFICATE
+
+
+def test_transcript_with_its_title_under_the_stamp_is_a_transcript():
+    page = make_page(["BOARD OF INTERMEDIATE AND SECONDARY EDUCATION, DHAKA", "Secondary School Certificate Examination - 2023", "ACADEMIC TRANSCRI", "Sl. No.  Name of Subjects  Letter Grade  Grade Point", "GPA 5.00"])
+    assert classify_page(page, TODAY).kind is PageKind.ACADEMIC_TRANSCRIPT
+
+
+def test_certificate_name_to_the_right_of_certify_that():
+    # A tall stamp line once merged rows, so "the next line" was the school's name.
+    from hklv_extract.extractors import academic_certificate
+    from hklv_ocr.reading import TextLine
+
+    page = make_page(["x"]).model_copy(update={"lines": (
+        TextLine(text="ATTESTED stamp", score=0.99, box=(1400, 850, 1900, 1500)),
+        TextLine(text="This is to Certify that", score=0.99, box=(690, 930, 1270, 1013)),
+        TextLine(text="Tasin Bin Rahad", score=0.99, box=(1360, 928, 1790, 993)),
+        TextLine(text="Bindu Basini Govt. Boys' High School", score=0.99, box=(820, 1354, 1770, 1435)),
+        TextLine(text="His/Her date of birth as recorded in his / her registration card is Fifth August Two", score=0.99, box=(605, 1781, 2945, 1892)),
+        TextLine(text="ATTISTED", score=0.99, box=(1892, 1861, 2179, 1928)),
+        TextLine(text="Thousand.", score=0.99, box=(611, 1879, 895, 1953)),
+    )})
+    cert = academic_certificate(_group(PageKind.ACADEMIC_CERTIFICATE, page), "c")
+    assert cert.student_name.value == "Tasin Bin Rahad"
+    assert cert.date_of_birth.value == date(2000, 8, 5)
+
+
+def test_dot_read_as_a_comma_in_a_date():
+    from hklv_extract.dates import find_dates
+
+    assert find_dates("Date:25.10,2026") == [date(2026, 10, 25)]
+    assert find_dates("Ward 8, 2, 1902") == []
+

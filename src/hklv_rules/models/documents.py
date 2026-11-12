@@ -144,6 +144,9 @@ class FamilyRelationshipCertificate(DocumentBase):
     issue_date: Extracted[date] = Field(default_factory=_date)
     registration_date: Extracted[date] = Field(default_factory=_date)
     notary: NotaryInfo | None = None
+    late_names: tuple[Extracted[str], ...] = Field(
+        default=(), description="Parents the text names as deceased: 'son of Late Md Abdur Razzak'"
+    )
 
 
 class AffidavitEntry(Frozen):
@@ -261,12 +264,14 @@ class AcademicCertificate(DocumentBase):
     level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
     student_name: Extracted[str] = Field(default_factory=_str)
     date_of_birth: Extracted[date] = Field(default_factory=_date)
+    notary: NotaryInfo | None = None
 
 
 class AcademicTranscript(DocumentBase):
     kind: Literal["academic_transcript"] = "academic_transcript"
     level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
     student_name: Extracted[str] = Field(default_factory=_str)
+    notary: NotaryInfo | None = None
 
 
 # --- Language test (optional) ---------------------------------------------------

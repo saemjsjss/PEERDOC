@@ -86,7 +86,9 @@ def number_match_rule(
 
 
 def notary_rule(rule_id: str, doc_id: str, notary: NotaryInfo | None, ctx: EvaluationContext) -> RuleResult:
-    """Notary Public/Advocate text AND a stamp: both seen -> PASS, either absent -> FAIL, unreadable -> FLAG."""
+    """Notary Public/Advocate text AND a stamp: both seen -> PASS, either absent -> FAIL, unreadable -> FLAG.
+
+    The words only need to be found: a low score on "Notary Public" doesn't make them doubtful."""
 
     def result(outcome: Outcome, reason: str, evidence=()) -> RuleResult:
         return RuleResult(rule_id=rule_id, outcome=outcome, reason=reason, evidence=evidence)
@@ -97,7 +99,8 @@ def notary_rule(rule_id: str, doc_id: str, notary: NotaryInfo | None, ctx: Evalu
         ev(doc_id, "notary.notary_text_present", notary.notary_text_present),
         ev(doc_id, "notary.stamp_present", notary.stamp_present),
     )
-    text = ctx.tri_state(notary.notary_text_present)
+    found = notary.notary_text_present.found and notary.notary_text_present.value is True
+    text = True if found else ctx.tri_state(notary.notary_text_present)
     stamp = ctx.tri_state(notary.stamp_present)
     missing = [label for label, v in (("Notary Public/Advocate text", text), ("stamp", stamp)) if v is False]
     if missing:

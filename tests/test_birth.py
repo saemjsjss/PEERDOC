@@ -10,11 +10,12 @@ from builders import (
     birth_certificate,
     by_rule,
     context,
+    ex,
     notarised,
     passport,
 )
 
-from hklv_rules.models import Language, Outcome
+from hklv_rules.models import Language, NotaryInfo, Outcome
 from hklv_rules.rules.birth import ALL_RULES, check_birth_certificates
 
 
@@ -300,3 +301,14 @@ def test_name_one_letter_off_flags_as_possible_misread():
     r = default_rules(name=STUDENT.replace(" ", "")[:-1])["BIRTH-05"]
     assert r.outcome is Outcome.FLAG
     assert "misread" in r.reason
+
+
+def test_low_confidence_notary_text_with_a_clear_stamp_passes():
+    # "Notary Public" read at 0.88 is still found; only a doubtful stamp makes it unsure.
+    notary = NotaryInfo(notary_text_present=ex(True, 0.88), stamp_present=ex(True, 0.92))
+    assert default_rules(notary=notary)["BIRTH-02"].outcome is Outcome.PASS
+
+
+def test_clear_notary_text_with_a_doubtful_stamp_flags():
+    notary = NotaryInfo(notary_text_present=ex(True, 0.95), stamp_present=ex(True, 0.5))
+    assert default_rules(notary=notary)["BIRTH-02"].outcome is Outcome.FLAG

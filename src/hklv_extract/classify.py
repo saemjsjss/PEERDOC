@@ -70,7 +70,15 @@ SIG = {
     "date_of_birth": _rx(r"DATE\s*OF\s*BIRTH"),
     # Not plain "Death Registration": every BDRIS birth certificate is issued by the
     # "Registrar of Birth and Death".
-    "death": _rx(r"DEATH\s*REGISTRATION\s*(?:NUMBER|NO)", r"DEATH\s*CERTIFICATE", r"DATE\s*OF\s*DEATH", r"মৃত্যু\s*নিবন্ধন\s*সনদ"),
+    # The Bangla title sits in a decorative banner OCR can't read; its rows (date, cause and
+    # place of death) are plain text. A Bangla death certificate also has an NID-number row.
+    "death": _rx(
+        r"DEATH\s*REGISTRATION\s*(?:NUMBER|NO)",
+        r"DEATH\s*CERTIFICATE",
+        r"DATE\s*OF\s*DEATH",
+        r"মৃত্যু\s*নিবন্ধন\s*সনদ",
+        r"মৃত্যুর?\s*(?:তারিখ|কারণ|স্থান)",
+    ),
     # 'CERTIFI?CA?TE': some councils print 'CERTIFICTE'.
     "frc": _rx(r"FAMILY\s*RELATIONSHIP\s*CERTIFI?CA?TE", r"FAMILY\s*CERTIFI?CA?TE", r"ওয়ারিশ"),
     "frc_issuer": _rx(r"UNION\s*PARI?S(?:H|S)?AD", r"UNION\s*PORISHAD", r"POURASHAVA", r"PAURASHAVA", r"MUNICIPALITY", r"CITY\s*CORPORATION"),
@@ -89,7 +97,9 @@ SIG = {
     "bank": _rx(r"\bBANK\b", r"\bBRANCH\b"),
     "account": _rx(r"\bA/?C\b", r"\bACCOUNT\b"),
     "statement": _rx(r"STATEMENT\s*OF\s*ACCOUNT", r"ACCOUNT\s*STATEMENT", r"BANK\s*STATEMENT"),
-    "transcript": _rx(r"ACADEMIC\s*TRANSCRIPT", r"\bTRANSCRIPT\b", r"GRADE\s*SHEET", r"MARK\s*SHEET"),
+    # Also the subject list: a notary stamp can cover the title. Not "Letter Grade":
+    # certificates print the grading-scale legend too.
+    "transcript": _rx(r"ACADEMIC\s*TRANSCRIPT", r"\bTRANSCRIPT\b", r"GRADE\s*SHEET", r"MARK\s*SHEET", r"NAME\s*OF\s*(?:THE\s*)?SUBJECTS?"),
     "acad_cert": _rx(r"CERTIFICATE\s*EXAMINATION", r"BOARD\s*OF\s*INTERMEDIATE", r"MADRASAH\s*EDUCATION\s*BOARD", r"TECHNICAL\s*EDUCATION\s*BOARD", r"\bUNIVERSITY\b"),
     "acad_award": _rx(r"\bPASSED\b", r"\bOBTAINED\b", r"\bDEGREE\b", r"\bG\.?P\.?A\b"),
     "language_test": _rx(r"\bIELTS\b", r"TEST\s*REPORT\s*FORM", r"\bTOPIK\b"),

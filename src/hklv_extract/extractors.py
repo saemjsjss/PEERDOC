@@ -794,7 +794,29 @@ def frc(group: PageGroup, doc_id: str) -> m.FamilyRelationshipCertificate:
         issue_date=issue_date,
         registration_date=_date(group, [r"Date\s*of\s*Registration", r"Registration\s*Date"]),
         notary=_notary(group),
+        late_names=_late_names(group),
     )
+
+
+# "son of Late Md Abdur Razzak & Rajea Akter": the capitalised name after "Late", up to "&"/"and"/",".
+_LATE = re.compile(r"(?i:\bLATE)\s+((?:[A-Z][A-Za-z.']*\s*){1,6}?)(?=\s*(?:&|(?i:\bAND\b|\bOF\b|\bIS\b)|,|\(|$))")
+
+
+def _late_names(group: PageGroup) -> tuple[Extracted[str], ...]:
+    names = []
+    for page in group.pages:
+        lines = reading_order(page.lines)
+        text, starts = "", []
+        for ln in lines:
+            starts.append(len(text))
+            text += ln.text + " "
+        for mt in _LATE.finditer(text):
+            name = clean_value(mt.group(1))
+            # the lines the match runs over
+            used = [ln for ln, a in zip(lines, starts, strict=True) if a < mt.end() and a + len(ln.text) > mt.start()]
+            if name and used:
+                names.append(text_field(Found(name, min(ln.score for ln in used), page.page_no), page))
+    return tuple(names)
 
 
 _PERSON_OF = (
@@ -1179,6 +1201,9 @@ _RANK = {
 }
 
 
+_CONFERS_DEGREE = re.compile(r"CONFERRED\s+(?:UPON\s+\w+\s+)?THE\s+DEGREE", re.IGNORECASE)
+
+
 def _level(group: PageGroup) -> Extracted:
     """The highest level the page names: a bachelor transcript also says "HSC or equivalent"
     (its entry requirement), an HSC certificate never names a degree."""
@@ -1189,6 +1214,14 @@ def _level(group: PageGroup) -> Extracted:
         if line is not None:
             hits.append((level, line))
     if not hits:
+        # A notary stamp over the degree line can leave only the layout reader's text,
+        # merged into the stamp's block. A degree is trusted there when the line reader
+        # confirms the page confers one ("HAS CONFERRED THE DEGREE OF").
+        vl = [lv for pattern, lv in _LEVELS if re.search(pattern, page.block_text, re.IGNORECASE)]
+        if vl:
+            level = max(vl, key=_RANK.get)
+            degree = level in (m.AcademicLevel.BACHELOR, m.AcademicLevel.MASTERS) and _CONFERS_DEGREE.search(page.line_text)
+            return Extracted[m.AcademicLevel](value=level, confidence=SINGLE_READER_FACTOR if degree else 0.6, source_page=page.page_no)
         return Extracted[m.AcademicLevel](value=m.AcademicLevel.OTHER, confidence=0.5, source_page=page.page_no)
     level, line = max(hits, key=lambda h: _RANK[h[0]])
     return Extracted[m.AcademicLevel](value=level, confidence=round(min(line.score, AGREE_CAP), 4), source_page=page.page_no)
@@ -1200,19 +1233,28 @@ def _student_name(group: PageGroup) -> Extracted[str]:
         return labelled
     # Certificates: "This is to Certify that <name>" with the name on the same or next line.
     for page in group.pages:
-        lines = reading_order(page.lines)
-        for i, ln in enumerate(lines):
+        for ln in reading_order(page.lines):
             mt = re.search(r"certify\s+that\s*(.*)$", ln.text, re.IGNORECASE)
             if not mt:
                 continue
             candidate = clean_value(mt.group(1))
             src = ln
-            if not candidate and i + 1 < len(lines):
-                candidate, src = clean_value(lines[i + 1].text), lines[i + 1]
+            nxt = _following(page.lines, ln)
+            if not candidate and nxt:
+                candidate, src = clean_value(nxt[0].text), nxt[0]
             candidate = re.split(r"\s+(?:Son|Daughter|S/O|D/O)\b", candidate, flags=re.IGNORECASE)[0]
             if re.fullmatch(NAME, candidate or ""):
                 return text_field(Found(candidate, src.score, page.page_no), page)
     return Extracted[str]()
+
+
+def _following(lines, ln) -> list:
+    """What reads on after `ln`: the rest of its row (left to right), then the next two rows.
+    By position, not reading_order: one tall line (a stamp) can merge rows there."""
+    h = max(1, ln.box[3] - ln.box[1])
+    right = sorted((o for o in lines if o is not ln and same_row(ln, o) and o.box[0] > ln.box[0]), key=lambda o: o.box[0])
+    below = [o for o in lines if o not in right and o is not ln and ln.box[3] - h * 0.25 < (o.box[1] + o.box[3]) / 2 <= ln.box[3] + 3 * h]
+    return right + sorted(below, key=lambda o: (o.box[1], o.box[0]))
 
 
 def _certificate_dob(group: PageGroup) -> Extracted[date]:
@@ -1222,12 +1264,18 @@ def _certificate_dob(group: PageGroup) -> Extracted[date]:
     # Board certificates write it out: "...date of birth as recorded in his/her registration
     # card is Fifth August Two Thousand." (often wrapped onto the next line).
     for page in group.pages:
-        lines = reading_order(page.lines)
-        for i, ln in enumerate(lines):
+        for ln in reading_order(page.lines):
             if not re.search(r"date\s*of\s*birth", ln.text, re.IGNORECASE):
                 continue
-            used = lines[i : i + 3]
-            d = parse_words_date(" ".join(x.text for x in used))
+            # The sentence wraps to lines starting at its left margin; a stamp's words beside
+            # it don't. As few lines as give a date.
+            h = max(1, ln.box[3] - ln.box[1])
+            more = [o for o in _following(page.lines, ln) if abs(o.box[0] - ln.box[0]) < 3 * h][:2]
+            d, used = None, []
+            for n in range(len(more) + 1):
+                used = [ln, *more[:n]]
+                if (d := parse_words_date(" ".join(x.text for x in used))) is not None:
+                    break
             if d is None:
                 continue
             score = min(x.score for x in used)
@@ -1250,11 +1298,12 @@ def academic_certificate(group: PageGroup, doc_id: str) -> m.AcademicCertificate
         level=_level(group),
         student_name=_student_name(group),
         date_of_birth=_certificate_dob(group),
+        notary=_notary(group),
     )
 
 
 def academic_transcript(group: PageGroup, doc_id: str) -> m.AcademicTranscript:
-    return m.AcademicTranscript(doc_id=doc_id, pages=group.page_nos, level=_level(group), student_name=_student_name(group))
+    return m.AcademicTranscript(doc_id=doc_id, pages=group.page_nos, level=_level(group), student_name=_student_name(group), notary=_notary(group))
 
 
 def e_apostille(group: PageGroup, doc_id: str) -> m.EApostille:

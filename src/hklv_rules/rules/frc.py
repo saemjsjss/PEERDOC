@@ -11,7 +11,7 @@ import re
 
 from ..context import EvaluationContext
 from ..identity import MatchKind, compare_name
-from ..models import FamilyRelationshipCertificate, FrcMember, Outcome, Person, RuleResult, worst
+from ..models import DeathCertificate, FamilyRelationshipCertificate, FrcMember, Outcome, Person, RuleResult, worst
 from ._evidence import ev
 from ._shared import notary_rule, recency_rule, subtract_months  # noqa: F401 (re-exported)
 
@@ -161,9 +161,29 @@ def _frc_03_parents(frc: FamilyRelationshipCertificate, ctx: EvaluationContext) 
             outcomes.append(Outcome.FLAG)
             reasons.append(f"no {label} row found, but {len(unreadable)} relation cell(s) unreadable")
         else:
-            outcomes.append(Outcome.FAIL)
-            reasons.append(f"no {label} row")
+            outcome, reason, more = _deceased_parent(frc, person, ctx)
+            outcomes.append(outcome)
+            reasons.append(reason)
+            evidence += more
     return RuleResult(rule_id=FRC_03, outcome=worst(outcomes), reason="; ".join(reasons), evidence=tuple(evidence))
+
+
+_NAME_OK = (MatchKind.EXACT, MatchKind.AFFIDAVIT)
+
+
+def _deceased_parent(frc: FamilyRelationshipCertificate, person: Person, ctx: EvaluationContext):
+    """No row for this parent: allowed when the text names them as "Late <name>" and their
+    death certificate is in the case (RULES-v2 FRC-03). Either missing -> FAIL."""
+    label = person.value
+    deaths = [d for d in ctx.case.of_kind(DeathCertificate) if compare_name(d.deceased_name, person, ctx).kind in _NAME_OK]
+    late = [(n, compare_name(n, person, ctx)) for n in frc.late_names]
+    late = [(n, c) for n, c in late if c.kind is not MatchKind.MISMATCH]
+    if not deaths or not late:
+        return Outcome.FAIL, f"no {label} row", []
+    name, cmp = max(late, key=lambda nc: nc[1].kind in _NAME_OK)
+    evidence = [ev(frc.doc_id, "late_names", name), ev(deaths[0].doc_id, "deceased_name", deaths[0].deceased_name)]
+    reason = f"no {label} row; named as late ({cmp.reason}) and death certificate {deaths[0].doc_id} is the {label}'s"
+    return (Outcome.PASS if cmp.kind in _NAME_OK else Outcome.FLAG), reason, evidence
 
 
 def _rows_with_relation(

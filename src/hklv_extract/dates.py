@@ -19,7 +19,8 @@ _MONTHS = {
 }
 _MONTH_RE = "|".join(sorted(_MONTHS, key=len, reverse=True))
 
-_NUMERIC = re.compile(r"\b(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})\b")
+_NUMERIC = re.compile(r"\b(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})\b|\b(\d{1,2})\.(\d{1,2}),(\d{4})\b")
+# second form: a dot read as a comma ('25.10,2026'); only tight to the digits, never '8, 2, 1902'
 # Year first is unambiguous with any separator: '2003-04-05', '2003/04/05' (TOPIK), '2003.04.05'.
 _ISO = re.compile(r"(?<!\d)(\d{4})([-/.])(\d{2})\2(\d{2})(?!\d)")
 _DAY_MONTH = re.compile(r"\b(\d{1,2})(?:ST|ND|RD|TH)?[\s\-.,/]*(" + _MONTH_RE + r")[A-Z]*[\s\-.,/']*(\d{4})\b", re.IGNORECASE)
@@ -40,7 +41,8 @@ def find_dates(text: str) -> list[date]:
         if (d := _make(int(m[1]), int(m[3]), int(m[4]))) is not None:
             hits.append((m.start(), d))
     for m in _NUMERIC.finditer(text):
-        if (d := _make(int(m[3]), int(m[2]), int(m[1]))) is not None:
+        day, month, year = m.groups()[:3] if m[1] else m.groups()[3:]
+        if (d := _make(int(year), int(month), int(day))) is not None:
             hits.append((m.start(), d))
     for m in _DAY_MONTH.finditer(text):
         if (d := _make(int(m[3]), _MONTHS[m[2].upper()], int(m[1]))) is not None:

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .reading import Barcode, Box, CaseReading, LayoutBlock, PageReading, TextLine
+from .red_seal import find_red_seals
 
 RENDER_DPI = 300  # PP-OCRv6 needs it for MRZ and small print
 # A page image never exceeds this (an A4 page at 300 dpi is ~8.7 MP). A PDF page with a
@@ -267,6 +268,8 @@ class PageReader:
         # page: 55 s instead of 16 s). Hand it back between the two readers.
         self._release_gpu_cache()
         blocks = self._blocks(bgr)
+        # The layout model misses the notary's red foil seal; it is found by colour.
+        blocks += tuple(LayoutBlock(label="red_seal", box=box, score=fill) for box, fill in find_red_seals(bgr))
         return lines, blocks, read_barcodes(image)
 
     def _release_gpu_cache(self) -> None:

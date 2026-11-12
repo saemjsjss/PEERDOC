@@ -1,4 +1,4 @@
-"""Rulebook v2.5 section 4.8: Academic certificates (ACAD-01 .. ACAD-04).
+"""Rulebook v2.5 section 4.8: Academic certificates (ACAD-01 .. ACAD-05).
 
 Pass 1 only creates academic documents inside an e-Apostille block. In a real submission
 every certificate and every transcript has its OWN e-Apostille page right before it:
@@ -28,6 +28,8 @@ Interpretations of the rulebook text:
     SSC and Dakhil certificates are checked against the passport DOB. When a
     certificate's level can't be read, its DOB still passes if it reliably equals the
     passport DOB; otherwise the rule FLAGs because the DOB check may apply.
+  * ACAD-05 (RULES-v2): every certificate and transcript is notarised, judged like every
+    other document's notary rule. The e-Apostille page is not checked.
 """
 
 from __future__ import annotations
@@ -52,9 +54,10 @@ from ..models import (
     worst,
 )
 from ._evidence import ev
+from ._shared import notary_rule
 
-ACAD_01, ACAD_02, ACAD_03, ACAD_04 = "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04"
-ALL_RULES = (ACAD_01, ACAD_02, ACAD_03, ACAD_04)
+ACAD_01, ACAD_02, ACAD_03, ACAD_04, ACAD_05 = "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04", "ACAD-05"
+ALL_RULES = (ACAD_01, ACAD_02, ACAD_03, ACAD_04, ACAD_05)
 
 OFFICIAL_APOSTILLE_HOSTS = ("apostille.mygov.bd",)
 
@@ -79,6 +82,7 @@ def check_academic(ctx: EvaluationContext) -> list[RuleResult]:
     results += _acad_02_pairs(apostilles, certificates, transcripts, ctx)
     results.append(_acad_03_equivalency([*certificates, *transcripts], ctx))
     results += [_acad_04_identity(d, ctx) for d in (*certificates, *transcripts)]
+    results += [_acad_05_notary(d, ctx) for d in (*certificates, *transcripts)]
     return results
 
 
@@ -389,3 +393,8 @@ def _dob_check(
         f"({passport_dob:%d-%m-%Y}){unknown_level}",
         evidence,
     )
+
+
+def _acad_05_notary(doc: AcademicDoc, ctx: EvaluationContext) -> RuleResult:
+    r = notary_rule(ACAD_05, doc.doc_id, doc.notary, ctx)
+    return r.model_copy(update={"reason": f"{_label(doc)}: {r.reason}"})

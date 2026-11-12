@@ -77,6 +77,7 @@ const TITLES: Record<string, string> = {
   'ACAD-02': 'Certificate and transcript for each level',
   'ACAD-03': 'Valid equivalency track (e.g. SSC + HSC)',
   'ACAD-04': "Names match the student; SSC date of birth matches",
+  'ACAD-05': 'Certificate and transcript are notarised',
   'TAX-01': 'Income tax documents (optional)',
   'TAX-03': 'Income shown at least 5,000,000 BDT',
   'TAX-04': 'Challan verified online',

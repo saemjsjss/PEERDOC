@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+import pytest
+
 from builders import (
     APOSTILLE_URL,
     HIGH,
@@ -16,6 +18,7 @@ from builders import (
     birth_certificate,
     by_rule,
     context,
+    notarised,
     passport,
     trade,
     FATHER,
@@ -79,6 +82,7 @@ def cert(
         level=Extracted(value=level, confidence=level_confidence, source_page=page) if level else Extracted(),
         student_name=Extracted(value=name, confidence=name_confidence, source_page=page) if name else Extracted(),
         date_of_birth=Extracted(value=dob, confidence=dob_confidence, source_page=page) if dob else Extracted(),
+        notary=notarised(),
     )
 
 
@@ -88,6 +92,7 @@ def transcript(level=SSC, level_confidence=HIGH, page=23, doc_id="transcript-x")
         pages=(page,),
         level=Extracted(value=level, confidence=level_confidence, source_page=page) if level else Extracted(),
         student_name=Extracted(value=STUDENT, confidence=HIGH, source_page=page),
+        notary=notarised(),
     )
 
 
@@ -106,6 +111,7 @@ def test_valid_ssc_hsc_set_passes_everything():
     assert len(of("ACAD-02", res)) == 2  # one per level, no apostille problems
     assert len(of("ACAD-03", res)) == 1
     assert len(of("ACAD-04", res)) == 4
+    assert len(of("ACAD-05", res)) == 4  # every certificate and transcript
 
 
 # --- ACAD-01 e-Apostille QR ---------------------------------------------------------
@@ -483,3 +489,23 @@ def test_transcript_checks_name_only():
 def test_one_acad04_result_per_certificate_and_transcript():
     res = results(*academic_set(levels=(SSC, HSC, BACHELOR)))
     assert len(of("ACAD-04", res)) == 6
+
+
+# --- ACAD-05 notarised (RULES-v2) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("notary", "expected"),
+    [
+        (notarised(), Outcome.PASS),
+        (None, Outcome.FAIL),
+        (notarised(stamp=False), Outcome.FAIL),
+        (notarised(confidence=LOW), Outcome.FLAG),
+    ],
+)
+def test_every_academic_document_must_be_notarised(notary, expected):
+    docs = [d.model_copy(update={"notary": notary}) if d.kind == "academic_transcript" else d for d in academic_set()]
+    res = of("ACAD-05", results(*docs))
+    assert len(res) == 4
+    assert {r.outcome for r in res if r.reason.startswith("Transcript")} == {expected}
+    assert {r.outcome for r in res if r.reason.startswith("Certificate")} == {Outcome.PASS}
