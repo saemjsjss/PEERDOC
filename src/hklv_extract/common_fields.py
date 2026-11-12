@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from datetime import date
 
 from hklv_ocr.reading import Box, LayoutBlock, PageReading
 from hklv_rules.models.common import Extracted, Language, NotaryInfo
 
-from .confidence import AGREE_CAP, SINGLE_READER_FACTOR
-from .text import bangla_ratio
+from .confidence import AGREE_CAP, SINGLE_READER_FACTOR, score_text
+from .dates import find_dates
+from .text import Found, bangla_ratio
 
 NOTARY_RE = re.compile(r"\bNOTARY\s*PUBLIC\b|\bADVOCATE\b", re.IGNORECASE)
 SEAL_NOTARY_STEM_RE = re.compile(r"\b(?:N[O0]TAR|ADV[O0]CAT)", re.IGNORECASE)
@@ -48,6 +50,53 @@ def notary_info(pages: Sequence[PageReading]) -> NotaryInfo:
     else:
         stamp = Extracted[bool](value=False, confidence=NO_SEAL_SEEN, source_page=pages[0].page_no)
     return NotaryInfo(notary_text_present=notary_text, stamp_present=stamp)
+
+
+NOTARY_ANCHOR_RE = re.compile(r"\bNOTARY\s*PUBLIC\b|\bADVOCATE\b|\bNOTARI[SZ]ED\b|\bATTESTED\b", re.IGNORECASE)
+TRANSLATOR_ANCHOR_RE = re.compile(r"\bTRANSLATED\s*BY\b|\bTRANSLATOR\b", re.IGNORECASE)
+STAMP_DATE_NEAR_PX = 400  # a stamp's date sits just above or below its words, in the same column
+HANDWRITTEN_NEAR_PX = 100  # a bare '10-06-2026' counts only right at the signature
+_SPLIT_DAY = re.compile(r"^(\W*)(\d)[ .](\d)(?=\D)")  # stamp ink spaces '2 9 JUN 2026', '1.5.SEP'
+# The whole line is the date: a rubber date stamp ('09 JUN 2026', '28OCT2026'), or a
+# written 'Date: 23/06/2026'. Document dates near the notary ('Date of Publication of
+# Results : 15 October, 2024', a birth date in a table) are never in this form.
+_STAMP_FORM = re.compile(r"\W*(?:DATE\W*)?\d{1,2}[\s.\-]*[A-Z]{3}\.?[\s.\-]*\d{4}\W*", re.IGNORECASE)
+_LABELED_NUMERIC = re.compile(r"\W*DATE\W*\d{1,2}[/\-.]\d{1,2}[/\-.]\d{4}\W*", re.IGNORECASE)
+_BARE_NUMERIC = re.compile(r"\W*\d{1,2}[/\-.]\d{1,2}[/\-.]\d{4}\W*")
+
+
+def stamp_dates(pages: Sequence[PageReading]) -> tuple[tuple[Extracted[date], ...], tuple[Extracted[date], ...]]:
+    """(notary dates, translator dates): a line that is only a date (see _STAMP_FORM), in
+    the same column as, and within STAMP_DATE_NEAR_PX of, the notary's or translator's
+    words. A date near both goes to the nearer one."""
+    notary: list[Extracted[date]] = []
+    translator: list[Extracted[date]] = []
+    for p in pages:
+        anchors = [(ln, notary) for ln in p.lines if NOTARY_ANCHOR_RE.search(ln.text)]
+        anchors += [(ln, translator) for ln in p.lines if TRANSLATOR_ANCHOR_RE.search(ln.text)]
+        if not anchors:
+            continue
+        for ln in p.lines:
+            text = _SPLIT_DAY.sub(r"\1\2\3", ln.text.strip())
+            if _STAMP_FORM.fullmatch(text) or _LABELED_NUMERIC.fullmatch(text):
+                reach = STAMP_DATE_NEAR_PX
+            elif _BARE_NUMERIC.fullmatch(text):
+                reach = HANDWRITTEN_NEAR_PX
+            else:
+                continue
+            dates = find_dates(text)
+            near = [
+                (_gap(ln.box, a.box), bucket)
+                for a, bucket in anchors
+                if a is not ln and min(ln.box[2], a.box[2]) > max(ln.box[0], a.box[0])
+                and _gap(ln.box, a.box) <= reach
+            ]
+            if dates and near:
+                conf = score_text(Found(text, ln.score, p.page_no), p)
+                min(near, key=lambda n: n[0])[1].append(
+                    Extracted[date](value=dates[0], confidence=round(conf, 4), source_page=p.page_no)
+                )
+    return tuple(notary), tuple(translator)
 
 
 def _gap(a: Box, b: Box) -> int:

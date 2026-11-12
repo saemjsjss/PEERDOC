@@ -1,4 +1,4 @@
-"""Section 4.5 Bank Solvency & Statement (BANK-01..04). All data fictional."""
+"""Section 4.5 Bank Solvency & Statement (BANK-01..05). All data fictional."""
 
 from datetime import date
 
@@ -34,7 +34,7 @@ def outcomes(results):
 
 def test_default_solvency_and_statement_pass_every_rule():
     r = run(bank_solvency(), bank_statement())
-    assert outcomes(r) == {f"BANK-0{i}": Outcome.PASS for i in range(1, 5)}
+    assert outcomes(r) == {f"BANK-0{i}": Outcome.PASS for i in range(1, 6)}
     assert "solvency" in r["BANK-02"].reason and "statement" in r["BANK-02"].reason
     assert "20-10-2026" in r["BANK-03"].reason
 
@@ -52,6 +52,7 @@ def test_no_solvency_fails_01_to_03_and_passes_04():
         "BANK-02": Outcome.FAIL,
         "BANK-03": Outcome.FAIL,
         "BANK-04": Outcome.PASS,
+        "BANK-05": Outcome.FAIL,
     }
     assert r["BANK-01"].reason == "No bank solvency letter found"
 
@@ -326,3 +327,24 @@ def test_reliable_number_match_still_fails_on_different_date():
 def test_whole_case_overall():
     assert overall(check_bank(context(bank_solvency(), bank_statement()))) is Outcome.PASS
     assert overall(check_bank(context(bank_solvency(holder=STUDENT), bank_statement()))) is Outcome.FAIL
+
+
+# --- BANK-05 USD and BDT amounts (RULES-v5) -------------------------------------------
+
+
+def test_missing_usd_amount_fails():
+    r = run(bank_solvency(usd=None), bank_statement())["BANK-05"]
+    assert r.outcome is Outcome.FAIL
+    assert "no USD amount" in r.reason
+
+
+def test_missing_both_amounts_fails_naming_both():
+    r = run(bank_solvency(usd=None, bdt=None), bank_statement())["BANK-05"]
+    assert r.outcome is Outcome.FAIL
+    assert "no USD or BDT amount" in r.reason
+
+
+def test_amounts_need_not_agree_or_be_read_surely():
+    # only presence matters: a low-confidence or mismatched figure still passes
+    r = run(bank_solvency(usd="USD 1.00", confidence=LOW), bank_statement())["BANK-05"]
+    assert r.outcome is Outcome.PASS

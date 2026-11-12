@@ -21,6 +21,7 @@ export const SECTIONS: Section[] = [
   { id: 'academic', title: 'Academic documents' },
   { id: 'tax', title: 'Income tax (optional)' },
   { id: 'language', title: 'IELTS / TOPIK (optional)' },
+  { id: 'stamps', title: 'Notary and translation dates' },
   { id: 'other', title: 'Other checks' },
 ]
 
@@ -59,9 +60,10 @@ const TITLES: Record<string, string> = {
   'BANK-02': 'Account number matches the statement',
   'BANK-03': 'Solvency date matches the statement date',
   'BANK-04': 'Minimum balance (not checked by rule)',
+  'BANK-05': 'Solvency letter states the amount in USD and BDT',
   'TRADE-01': 'Trade licence in English or translated',
   'TRADE-02': 'Trade licence is notarised',
-  'TRADE-03': 'Trade licence is for the current fiscal year',
+  'TRADE-03': 'Trade licence valid this fiscal year (to 30 June) or issued since 1 July',
   'TRADE-04': 'Trade licence owner is the father or mother',
   'EMP-01': 'Employment certificate in English or translated',
   'EMP-02': 'Employment certificate is notarised',
@@ -78,6 +80,8 @@ const TITLES: Record<string, string> = {
   'ACAD-03': 'Valid equivalency track (e.g. SSC + HSC)',
   'ACAD-04': "Names match the student; SSC date of birth matches",
   'ACAD-05': 'Certificate and transcript are notarised',
+  'ACAD-06': 'SSC and HSC registration numbers match',
+  'STAMP-01': 'Notary and translation dates within 3 months',
   'TAX-01': 'Income tax documents (optional)',
   'TAX-03': 'Income shown at least 5,000,000 BDT',
   'TAX-04': 'Challan verified online',
@@ -101,6 +105,7 @@ const SECTION_OF_PREFIX: [string, string][] = [
   ['ACAD-', 'academic'],
   ['TAX-', 'tax'],
   ['LANG-', 'language'],
+  ['STAMP-', 'stamps'],
 ]
 
 export function ruleTitle(ruleId: string): string {

@@ -11,6 +11,7 @@ from .nid import check_nids
 from .nid_assignment import NidAssignment, assign_nids
 from .passport import check_passport
 from .required import check_required_documents
+from .stamps import check_stamp_dates
 from .tax import check_income_tax
 from .tin import check_tin
 from .trade import check_trade_licenses
@@ -31,6 +32,7 @@ __all__ = [
     "check_nids",
     "check_passport",
     "check_required_documents",
+    "check_stamp_dates",
     "check_tin",
     "check_trade_licenses",
 ]

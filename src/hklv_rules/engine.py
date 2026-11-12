@@ -28,6 +28,7 @@ from .rules import (
     check_nids,
     check_passport,
     check_required_documents,
+    check_stamp_dates,
     check_tin,
     check_trade_licenses,
 )
@@ -91,6 +92,7 @@ def run_all_rules(ctx: EvaluationContext) -> list[RuleResult]:
         *check_income_tax(ctx),  # 4.9 (optional)
         *check_language_tests(ctx),  # 4.10 (optional)
         *check_financial_chain(ctx),  # 5.1
+        *check_stamp_dates(ctx),  # 4.12 (RULES-v5)
     ]
     if NOT_YET_IMPLEMENTED:
         results.append(

@@ -20,7 +20,7 @@ from hklv_rules.models.common import Extracted, NotaryInfo, Person
 from .classify import PageKind
 from .common_fields import document_language, has_translation, notary_info, page_language
 from .confidence import AGREE_CAP, DISAGREE, MRZ_INVALID, MRZ_VALID, SINGLE_READER_FACTOR, VL_ONLY, date_field, derived, score_text, text_field
-from .dates import has_month_name, parse_amount_words, parse_boxed_date, parse_date, parse_words_date
+from .dates import find_dates, has_month_name, parse_amount_words, parse_boxed_date, parse_date, parse_words_date
 from .group import PageGroup
 from .mrz import MrzResult
 from .text import ROW_FIRST_GAP_PX, Found, as_lines_page, clean_value, find_labeled, levenshtein, line_under, reading_order, same_row, squash
@@ -956,6 +956,69 @@ def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
     return Extracted[str]()
 
 
+# money, not a row number or year: grouped digits, decimals, or 5+ digits; never a rate's
+# digits ('USD@124.50 BDT')
+_AMT = r"(?<![@\d.,])(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+\.\d{2}|\d{5,})(?![\d,])"
+_USD_WORD = r"\bUSD\b|\bUS\s*\$|\$|\bUS\s*Dollars?\b"
+_BDT_WORD = r"\bBDT\b|\bTk\b|\bTaka\b"
+# currency then amount ('USD 19,338.09'), else amount then currency, but not a rate
+# ('1 USD = 123.70')
+_USD_AMOUNT = (
+    re.compile(rf"(?:{_USD_WORD})\s*[:.,]?\s*{_AMT}", re.IGNORECASE),
+    re.compile(rf"{_AMT}\s*(?:{_USD_WORD})(?!\s*=)", re.IGNORECASE),
+)
+_BDT_AMOUNT = (
+    re.compile(rf"(?:{_BDT_WORD})\s*[:.,]?\s*{_AMT}", re.IGNORECASE),
+    re.compile(rf"{_AMT}\s*/?-?\s*(?:{_BDT_WORD})(?!\s*=)", re.IGNORECASE),
+)
+_RATE = re.compile(r"=|@|\bRATE\b", re.IGNORECASE)
+_CELL_AMOUNT = re.compile(rf"\W*{_AMT}")  # a cell that starts with the amount ('20191.88(Approximately)')
+
+
+def _amount_under_header(page: PageReading, word: str) -> TextLine | None:
+    """A table column headed by the currency ('Balance (USD)') with an amount below it."""
+    word_re = re.compile(word, re.IGNORECASE)
+    for h in page.lines:
+        if not word_re.search(h.text) or _RATE.search(h.text):
+            continue
+        below = [
+            o for o in page.lines
+            if o.box[1] >= h.box[3] - 5 and min(o.box[2], h.box[2]) > max(o.box[0], h.box[0]) and _CELL_AMOUNT.match(o.text)
+        ]
+        if below:
+            return min(below, key=lambda o: o.box[1])
+    return None
+
+
+def _amount_shown(group: PageGroup, patterns: tuple[re.Pattern[str], ...], word: str) -> Extracted[str]:
+    """The first amount in that currency, from either reader: written next to the currency,
+    or in a column headed by it. Only its presence is checked (BANK-05), so where it was
+    found matters, not how surely it was read."""
+    for p in group.pages:
+        lines = " ".join(ln.text for ln in reading_order(p.lines))
+        vl = html.unescape(re.sub(r"<[^>]+>", " ", p.block_text))
+        for rx in patterns:
+            for text, conf in ((lines, AGREE_CAP), (vl, VL_ONLY)):
+                if mt := rx.search(text):
+                    return derived(clean_value(mt.group(0)), conf, p.page_no)
+        if cell := _amount_under_header(p, word):
+            return derived(clean_value(cell.text), cell.score, p.page_no)
+    return Extracted[str]()
+
+
+# Board registration 'No. 1910534278/2022-23' (or '/2015', '/2017-2018'): the number, then the session. Only the
+# number is kept: SSC and HSC share it, their sessions differ (ACAD-06).
+_BOARD_REGISTRATION = re.compile(r"(?<!\d)(\d{6,12})\s*/\s*(?:19|20)\d{2}(?:\s*-\s*\d{2,4})?(?!\d)")
+
+
+def _board_registration(group: PageGroup) -> Extracted[str]:
+    for p in group.pages:
+        for ln in reading_order(p.lines):
+            if mt := _BOARD_REGISTRATION.search(ln.text):
+                return text_field(Found(mt.group(1), ln.score, p.page_no), p)
+    return Extracted[str]()
+
+
 def bank_solvency(group: PageGroup, doc_id: str) -> m.BankSolvency:
     # The letter's own sentence first; its details table has column headers ("Name of
     # Account | Account Number | Balance") that a label search would read as the value.
@@ -968,6 +1031,8 @@ def bank_solvency(group: PageGroup, doc_id: str) -> m.BankSolvency:
         account_holder=holder,
         account_number=_account_number(group),
         letter_date=_date(group, LETTER_DATE),
+        usd_amount=_amount_shown(group, _USD_AMOUNT, _USD_WORD),
+        bdt_amount=_amount_shown(group, _BDT_AMOUNT, _BDT_WORD),
     )
 
 
@@ -979,6 +1044,42 @@ def bank_statement(group: PageGroup, doc_id: str) -> m.BankStatement:
         account_number=_account_number(group),
         statement_date=_date(group, [r"Generation\s*Date", r"Generated\s*(?:on|Date)", r"As\s*on", r"Print(?:ing)?\s*Date", r"Printed\s*on", r"Statement\s*Date"]),
     )
+
+
+# 'Valid up to 30 June 2027', 'valid till June 30, 2027', 'Date of Validity : 30-06-2027',
+# 'Validity of this trade license 1st July 2026 to 30th June 2027'
+_VALIDITY = re.compile(r"\bVALID|\bTILL\b|\bUP\s*TO\b", re.IGNORECASE)
+_FY_WORDS = re.compile(r"\b(?:FISCAL|FINANCIAL|FINANCE|ASSESSMENT)\s*YEAR\b|\bTENURE\b|\bTERM\b", re.IGNORECASE)
+_FY_VALUE = re.compile(r"(20\d{2})\s*[-–/]\s*((?:20)?\d{2})(?!\d)")
+
+
+def _latest_dated(group: PageGroup, pages: Sequence[PageReading], line_re: re.Pattern[str]) -> Extracted[date]:
+    """The latest date on any line matching `line_re` (a renewal page lists every year)."""
+    best: tuple[date, Found, PageReading] | None = None
+    for p in pages:
+        for ln in p.lines:
+            ds = [d for d in find_dates(ln.text) if d.year >= 2000] if line_re.search(ln.text) else []  # not '20251' -> 0251
+            if ds:
+                if best is None or max(ds) > best[0]:
+                    best = (max(ds), Found(ln.text, ln.score, p.page_no), p)
+    if best is None:
+        return Extracted[date]()
+    return date_field(best[0], score_text(best[1], best[2]), best[1].page_no)
+
+
+def _fiscal_year_line(pages: Sequence[PageReading]) -> tuple[Found, PageReading] | None:
+    """'Tenure: 2025-2026 Financial Year', 'Term 2026-2027 fiscal year': the latest year
+    printed on a line that names it."""
+    best = None
+    for p in pages:
+        for ln in p.lines:
+            if not _FY_WORDS.search(ln.text):
+                continue
+            for a, b in _FY_VALUE.findall(ln.text):
+                end = b if len(b) == 4 else a[:2] + b
+                if best is None or (a, end) > best[0]:
+                    best = ((a, end), Found(f"{a}-{end}", ln.score, p.page_no), p)
+    return (best[1], best[2]) if best else None
 
 
 def trade_license(group: PageGroup, doc_id: str) -> m.TradeLicense:
@@ -993,12 +1094,16 @@ def trade_license(group: PageGroup, doc_id: str) -> m.TradeLicense:
         mt = re.match(r"(20\d{2})\s*[-–/]\s*((?:20)?\d{2})", found.value)
         end = mt.group(2) if len(mt.group(2)) == 4 else mt.group(1)[:2] + mt.group(2)
         fy = (Found(f"{mt.group(1)}-{end}", found.score, found.page_no), page)
+    elif (line_fy := _fiscal_year_line(english)) is not None:
+        fy = line_fy
     return m.TradeLicense(
         doc_id=doc_id,
         pages=group.page_nos,
         license_number=_text(group, [r"Licen[cs]e\s*(?:No|Number)\.?", r"Trade\s*Licen[cs]e\s*(?:No|Number)\.?"], r"[A-Z0-9/\-]*\d{6,}[A-Z0-9/\-]*", pages=english),
         owner_name=_name(group, [r"Name\s*of\s*(?:the\s*)?(?:Proprietor|Owner)(?:\s*/\s*Assessee)?", r"Proprietor'?s?\s*Name", r"Owner'?s?\s*Name", r"Name\s*of\s*Licen[cs]es?\s*Holder"], pages=english),
         fiscal_year=text_field(*fy) if fy else Extracted[str](),
+        valid_until=_latest_dated(group, english, _VALIDITY),
+        issue_date=_date(group, [r"Date\s*of\s*Issue", r"Issue\s*Date"], pages=english),
         language=document_language(group.pages),
         has_english_translation=has_translation(group.pages),
         notary=_notary(group),
@@ -1323,12 +1428,20 @@ def academic_certificate(group: PageGroup, doc_id: str) -> m.AcademicCertificate
         level=_level(group),
         student_name=_student_name(group),
         date_of_birth=_certificate_dob(group),
+        registration_number=_board_registration(group),
         notary=_notary(group),
     )
 
 
 def academic_transcript(group: PageGroup, doc_id: str) -> m.AcademicTranscript:
-    return m.AcademicTranscript(doc_id=doc_id, pages=group.page_nos, level=_level(group), student_name=_student_name(group), notary=_notary(group))
+    return m.AcademicTranscript(
+        doc_id=doc_id,
+        pages=group.page_nos,
+        level=_level(group),
+        student_name=_student_name(group),
+        registration_number=_board_registration(group),
+        notary=_notary(group),
+    )
 
 
 def e_apostille(group: PageGroup, doc_id: str) -> m.EApostille:

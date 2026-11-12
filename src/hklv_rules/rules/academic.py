@@ -1,4 +1,4 @@
-"""Rulebook v2.5 section 4.8: Academic certificates (ACAD-01 .. ACAD-05).
+"""Rulebook v2.5 section 4.8: Academic certificates (ACAD-01 .. ACAD-06).
 
 Pass 1 only creates academic documents inside an e-Apostille block. In a real submission
 every certificate and every transcript has its OWN e-Apostille page right before it:
@@ -30,6 +30,10 @@ Interpretations of the rulebook text:
     passport DOB; otherwise the rule FLAGs because the DOB check may apply.
   * ACAD-05 (RULES-v2): every certificate and transcript is notarised, judged like every
     other document's notary rule. The e-Apostille page is not checked.
+  * ACAD-06 (RULES-v5): SSC and HSC carry the same board registration number (only the
+    session after '/' differs). Two reliably read numbers that differ -> FLAG; anything
+    the OCR is unsure of, or a number not found, -> PASS. One result, only when both an
+    SSC and an HSC document are present.
 """
 
 from __future__ import annotations
@@ -57,7 +61,8 @@ from ._evidence import ev
 from ._shared import notary_rule
 
 ACAD_01, ACAD_02, ACAD_03, ACAD_04, ACAD_05 = "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04", "ACAD-05"
-ALL_RULES = (ACAD_01, ACAD_02, ACAD_03, ACAD_04, ACAD_05)
+ACAD_06 = "ACAD-06"
+ALL_RULES = (ACAD_01, ACAD_02, ACAD_03, ACAD_04, ACAD_05, ACAD_06)
 
 OFFICIAL_APOSTILLE_HOSTS = ("apostille.mygov.bd",)
 
@@ -83,6 +88,7 @@ def check_academic(ctx: EvaluationContext) -> list[RuleResult]:
     results.append(_acad_03_equivalency([*certificates, *transcripts], ctx))
     results += [_acad_04_identity(d, ctx) for d in (*certificates, *transcripts)]
     results += [_acad_05_notary(d, ctx) for d in (*certificates, *transcripts)]
+    results += _acad_06_registration([*certificates, *transcripts], ctx)
     return results
 
 
@@ -398,3 +404,30 @@ def _dob_check(
 def _acad_05_notary(doc: AcademicDoc, ctx: EvaluationContext) -> RuleResult:
     r = notary_rule(ACAD_05, doc.doc_id, doc.notary, ctx)
     return r.model_copy(update={"reason": f"{_label(doc)}: {r.reason}"})
+
+
+def _acad_06_registration(docs: list[AcademicDoc], ctx: EvaluationContext) -> list[RuleResult]:
+    by_level = {
+        lvl: [d for d in docs if d.level.found and d.level.value is lvl]
+        for lvl in (AcademicLevel.SSC, AcademicLevel.HSC)
+    }
+    if not all(by_level.values()):
+        return []
+    evidence = tuple(
+        ev(d.doc_id, "registration_number", d.registration_number) for lvl in by_level.values() for d in lvl
+    )
+    sure = {
+        lvl: {d.registration_number.value: d.doc_id for d in ds if d.registration_number.is_reliable(ctx.threshold)}
+        for lvl, ds in by_level.items()
+    }
+    ssc, hsc = sure[AcademicLevel.SSC], sure[AcademicLevel.HSC]
+    differ = [(s, h) for s in ssc for h in hsc if s != h]
+    if differ:
+        s, h = differ[0]
+        outcome = Outcome.FLAG
+        reason = f"SSC registration no. {s} ({ssc[s]}) differs from HSC registration no. {h} ({hsc[h]})"
+    elif ssc and hsc:
+        outcome, reason = Outcome.PASS, f"SSC and HSC share registration no. {next(iter(ssc))}"
+    else:
+        outcome, reason = Outcome.PASS, "registration numbers not read with enough confidence to compare (not checked)"
+    return [RuleResult(rule_id=ACAD_06, outcome=outcome, reason=reason, evidence=evidence)]

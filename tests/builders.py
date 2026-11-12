@@ -193,12 +193,16 @@ def bank_solvency(
     letter_date: date | None = BANK_DATE,
     confidence: float = HIGH,
     doc_id: str = "solvency",
+    usd: str | None = "USD 19,338.09",
+    bdt: str | None = "BDT 2,407,592.52",
 ) -> BankSolvency:
     return BankSolvency(
         doc_id=doc_id,
         account_holder=ex(holder, confidence),
         account_number=_opt(account, confidence),
         letter_date=_opt(letter_date, confidence),
+        usd_amount=_opt(usd, confidence),
+        bdt_amount=_opt(bdt, confidence),
     )
 
 

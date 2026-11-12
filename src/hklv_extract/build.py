@@ -13,6 +13,7 @@ from hklv_ocr.reading import CaseReading
 from hklv_rules.models.case import CaseFile
 
 from .classify import PageClass, PageKind, classify_pages
+from .common_fields import stamp_dates
 from .extractors import EXTRACTORS
 from .group import group_pages
 
@@ -49,7 +50,12 @@ def build_case(reading: CaseReading, case_id: str, evaluation_date: date) -> tup
         counter[g.kind] += 1
         doc_id = f"{g.kind.value}-{counter[g.kind]}"
         try:
-            documents.append(extractor(g, doc_id))
+            notary_dates, translation_dates = stamp_dates(g.pages)
+            documents.append(
+                extractor(g, doc_id).model_copy(
+                    update={"notary_dates": notary_dates, "translation_dates": translation_dates}
+                )
+            )
         except Exception as e:  # noqa: BLE001 - one unreadable document must not sink the case
             # Log the type only: messages could quote document content. With every field
             # empty, the document's rules FLAG it for a person instead of the case crashing.

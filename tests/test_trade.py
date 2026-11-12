@@ -1,4 +1,4 @@
-"""Section 4.6 Trade License (TRADE-01..04). All data fictional."""
+"""Section 4.6 Trade License (TRADE-01..04; TRADE-03 per RULES-v5). All data fictional."""
 
 from datetime import date
 
@@ -85,19 +85,58 @@ def test_older_fiscal_year_fails():
     assert r.evidence[0].field == "fiscal_year"
 
 
-def test_later_fiscal_year_flags():
-    r = run(trade(FATHER, fiscal_year="2027-2028"))["TRADE-03"]
-    assert r.outcome is Outcome.FLAG
-    assert "later" in r.reason
+def test_later_fiscal_year_passes():
+    # RULES-v5: valid until 30-06-2028 covers the current year's 30 June
+    assert run(trade(FATHER, fiscal_year="2027-2028"))["TRADE-03"].outcome is Outcome.PASS
 
 
-@pytest.mark.parametrize("text", ["2026-2028", "2026-25", "2026", "renewed", "2025-2026 2026-2027"])
-def test_unreadable_fiscal_year_flags(text):
-    assert run(trade(FATHER, fiscal_year=text))["TRADE-03"].outcome is Outcome.FLAG
+def test_renewal_page_listing_several_years_takes_the_latest():
+    assert run(trade(FATHER, fiscal_year="2025-2026 2026-2027"))["TRADE-03"].outcome is Outcome.PASS
 
 
-def test_missing_fiscal_year_flags():
-    assert run(trade(FATHER, fiscal_year=None))["TRADE-03"].outcome is Outcome.FLAG
+@pytest.mark.parametrize("text", ["2026-2028", "2026-25", "2026", "renewed"])
+def test_unreadable_fiscal_year_alone_fails(text):
+    # RULES-v5: no usable validity, fiscal year or issue date -> FAIL
+    assert run(trade(FATHER, fiscal_year=text))["TRADE-03"].outcome is Outcome.FAIL
+
+
+def test_missing_fiscal_year_fails():
+    r = run(trade(FATHER, fiscal_year=None))["TRADE-03"]
+    assert r.outcome is Outcome.FAIL
+    assert "no validity date, fiscal year or issue date found" in r.reason
+
+
+def with_dates(fiscal_year=None, valid_until=None, issued=None, conf=0.99):
+    t = trade(FATHER, fiscal_year=fiscal_year)
+    upd = {}
+    if valid_until:
+        upd["valid_until"] = ex(valid_until, conf)
+    if issued:
+        upd["issue_date"] = ex(issued, conf)
+    return t.model_copy(update=upd)
+
+
+def test_valid_until_next_30_june_passes_in_january():
+    r = run(with_dates(valid_until=date(2027, 6, 30)), evaluation_date=date(2027, 1, 15))["TRADE-03"]
+    assert r.outcome is Outcome.PASS
+    assert "valid until 30-06-2027" in r.reason
+
+
+def test_issued_since_1_july_passes_even_with_an_old_fiscal_year():
+    t = with_dates(fiscal_year="2025-2026", issued=date(2026, 7, 1))
+    assert run(t, evaluation_date=date(2027, 1, 15))["TRADE-03"].outcome is Outcome.PASS
+
+
+def test_neither_valid_nor_issued_this_year_fails():
+    t = with_dates(valid_until=date(2026, 6, 30), issued=date(2026, 3, 10))
+    r = run(t, evaluation_date=date(2027, 1, 15))["TRADE-03"]
+    assert r.outcome is Outcome.FAIL
+    assert "30-06-2027" in r.reason and "01-07-2026" in r.reason
+
+
+def test_low_confidence_issue_date_flags_instead_of_failing():
+    t = with_dates(fiscal_year="2025-2026", issued=date(2026, 8, 1), conf=LOW)
+    assert run(t, evaluation_date=date(2027, 1, 15))["TRADE-03"].outcome is Outcome.FLAG
 
 
 def test_low_confidence_fiscal_year_flags():

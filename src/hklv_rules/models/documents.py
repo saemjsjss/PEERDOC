@@ -57,6 +57,8 @@ class OnlineCheck(Frozen):
 class DocumentBase(Frozen):
     doc_id: str = Field(min_length=1)
     pages: tuple[int, ...] = Field(default=(), description="1-based page numbers in the upload")
+    notary_dates: tuple[Extracted[date], ...] = Field(default=(), description="Dates on the notary's stamp/attestation")
+    translation_dates: tuple[Extracted[date], ...] = Field(default=(), description="Dates by the translator's signature")
 
 
 # --- Identity -----------------------------------------------------------------
@@ -173,6 +175,8 @@ class BankSolvency(DocumentBase):
     account_holder: Extracted[str] = Field(default_factory=_str)
     account_number: Extracted[str] = Field(default_factory=_str)
     letter_date: Extracted[date] = Field(default_factory=_date)
+    usd_amount: Extracted[str] = Field(default_factory=_str, description="An amount in US dollars")
+    bdt_amount: Extracted[str] = Field(default_factory=_str, description="An amount in taka")
 
 
 class BankStatement(DocumentBase):
@@ -189,6 +193,8 @@ class TradeLicense(DocumentBase):
     license_number: Extracted[str] = Field(default_factory=_str)
     owner_name: Extracted[str] = Field(default_factory=_str)
     fiscal_year: Extracted[str] = Field(default_factory=_str, description="e.g. '2026-2027'")
+    valid_until: Extracted[date] = Field(default_factory=_date, description="'Valid up to 30 June 2027'")
+    issue_date: Extracted[date] = Field(default_factory=_date)
     language: Extracted[Language] = Field(default_factory=_lang)
     has_english_translation: Extracted[bool] = Field(default_factory=_bool)
     notary: NotaryInfo | None = None
@@ -264,6 +270,7 @@ class AcademicCertificate(DocumentBase):
     level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
     student_name: Extracted[str] = Field(default_factory=_str)
     date_of_birth: Extracted[date] = Field(default_factory=_date)
+    registration_number: Extracted[str] = Field(default_factory=_str, description="Board registration no., without the session")
     notary: NotaryInfo | None = None
 
 
@@ -271,6 +278,7 @@ class AcademicTranscript(DocumentBase):
     kind: Literal["academic_transcript"] = "academic_transcript"
     level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
     student_name: Extracted[str] = Field(default_factory=_str)
+    registration_number: Extracted[str] = Field(default_factory=_str, description="Board registration no., without the session")
     notary: NotaryInfo | None = None
 
 

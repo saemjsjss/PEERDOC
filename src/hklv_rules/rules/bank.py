@@ -1,4 +1,4 @@
-"""Rulebook v2.5 section 4.5: Bank Solvency & Statement (BANK-01 .. BANK-04).
+"""Rulebook v2.5 section 4.5: Bank Solvency & Statement (BANK-01 .. BANK-05).
 
 BANK-01..03 give one result per Bank Solvency letter. The solvency is paired with the
 statement whose account number matches it (BANK-02); BANK-03 then compares the letter
@@ -18,8 +18,8 @@ from ..models import BankSolvency, BankStatement, Extracted, Outcome, Person, Ru
 from ._evidence import ev
 from ._shared import assign_by_name, digits
 
-BANK_01, BANK_02, BANK_03, BANK_04 = "BANK-01", "BANK-02", "BANK-03", "BANK-04"
-ALL_RULES = (BANK_01, BANK_02, BANK_03, BANK_04)
+BANK_01, BANK_02, BANK_03, BANK_04, BANK_05 = "BANK-01", "BANK-02", "BANK-03", "BANK-04", "BANK-05"
+ALL_RULES = (BANK_01, BANK_02, BANK_03, BANK_04, BANK_05)
 
 _NO_SOLVENCY = "No bank solvency letter found"
 _NO_STATEMENT = "No bank statement to compare against"
@@ -30,7 +30,7 @@ def check_bank(ctx: EvaluationContext) -> list[RuleResult]:
     statements = ctx.case.of_kind(BankStatement)
     if not solvencies:
         return [
-            *(RuleResult(rule_id=r, outcome=Outcome.FAIL, reason=_NO_SOLVENCY) for r in (BANK_01, BANK_02, BANK_03)),
+            *(RuleResult(rule_id=r, outcome=Outcome.FAIL, reason=_NO_SOLVENCY) for r in (BANK_01, BANK_02, BANK_03, BANK_05)),
             _bank_04(solvencies, statements),
         ]
     results: list[RuleResult] = []
@@ -39,6 +39,7 @@ def check_bank(ctx: EvaluationContext) -> list[RuleResult]:
             _bank_01_holder(s, ctx),
             _bank_02_account(s, statements, ctx),
             _bank_03_date(s, statements, ctx),
+            _bank_05_currencies(s),
         ]
     results.append(_bank_04(solvencies, statements))
     return results
@@ -207,6 +208,25 @@ def _bank_03_date(s: BankSolvency, statements: list[BankStatement], ctx: Evaluat
         return result(Outcome.FLAG, f"letter date {letter:%d-%m-%Y}; statement date on Bank Statement {what}")
     others = ", ".join(f"{st.doc_id} {st.statement_date.value:%d-%m-%Y}" for st in reliable)
     return result(Outcome.FAIL, f"letter date {letter:%d-%m-%Y} does not match the statement date ({others})")
+
+
+# --- BANK-05 USD and BDT amounts ------------------------------------------------
+
+
+def _bank_05_currencies(s: BankSolvency) -> RuleResult:
+    """RULES-v5: the letter must state the balance in both USD and BDT; the figures
+    themselves are not checked. Either currency missing -> FAIL."""
+    missing = [name for name, x in (("USD", s.usd_amount), ("BDT", s.bdt_amount)) if not x.found]
+    if missing:
+        outcome, reason = Outcome.FAIL, f"no {' or '.join(missing)} amount stated"
+    else:
+        outcome, reason = Outcome.PASS, f"amounts stated in USD ({s.usd_amount.value}) and BDT ({s.bdt_amount.value})"
+    return RuleResult(
+        rule_id=BANK_05,
+        outcome=outcome,
+        reason=f"Bank Solvency {s.doc_id}: {reason}",
+        evidence=(ev(s.doc_id, "usd_amount", s.usd_amount), ev(s.doc_id, "bdt_amount", s.bdt_amount)),
+    )
 
 
 # --- BANK-04 Minimum balance ------------------------------------------------------
