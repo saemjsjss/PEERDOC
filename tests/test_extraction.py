@@ -715,7 +715,8 @@ def test_line_joined_with_a_numeric_date_cell_is_not_taken_whole():
 def test_vl_cell_missing_a_digit_is_not_confirmed_by_the_longer_number():
     table = LETTER_TABLE.replace(ACCOUNT, ACCOUNT[1:])  # VL dropped the leading zero
     acct = _solvency(_letter(WRAPPED_HEADER, [_row(900, ACCOUNT)], table=table)).account_number
-    assert acct.value == ACCOUNT[1:]
+    # the line under the wrapped header's "Number" gives the full digits; VL's cell lacks one
+    assert acct.value == ACCOUNT
     assert not acct.is_reliable(0.9)  # the readers disagree: FLAG, never FAIL
 
 

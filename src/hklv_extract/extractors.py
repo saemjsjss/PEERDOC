@@ -120,6 +120,18 @@ def _mrz_page(group: PageGroup, mrz: MrzResult) -> int:
     return group.pages[0].page_no
 
 
+def _printed_as_in_mrz(group: PageGroup, mrz_name: str) -> Extracted[str]:
+    """The printed name when its label was not read (smudged or highlighted '/Surname'):
+    a line of the data page that is exactly the MRZ's name. Only found, never guessed."""
+    if not mrz_name:
+        return Extracted[str]()
+    for p in group.pages:
+        for ln in p.lines:
+            if squash(ln.text) == squash(mrz_name):
+                return text_field(Found(clean_value(ln.text), ln.score, p.page_no), p)
+    return Extracted[str]()
+
+
 def _agree_with_mrz(printed: Extracted[str], mrz_name: str) -> Extracted[str]:
     """Printed name confirmed by the MRZ (word order ignored) is as good as two readers."""
     if printed.value is None or not mrz_name:
@@ -498,8 +510,8 @@ def passport(group: PageGroup, doc_id: str) -> m.Passport:
             "date_of_birth": date_field(mrz.birth_date, _mrz_conf(mrz, "birth_date"), page_no),
             "date_of_expiry": date_field(mrz.expiry_date, _mrz_conf(mrz, "expiry_date"), page_no),
         }
-        surname = _agree_with_mrz(surname, mrz.surname)
-        given = _agree_with_mrz(given, mrz.given_names)
+        surname = _agree_with_mrz(surname if surname.found else _printed_as_in_mrz(group, mrz.surname), mrz.surname)
+        given = _agree_with_mrz(given if given.found else _printed_as_in_mrz(group, mrz.given_names), mrz.given_names)
     else:
         fields = {
             "passport_number": _text(group, [r"Passport\s*No\.?", r"Passport\s*Number"], r"[A-Z]{1,2}\d{7,8}"),
@@ -932,7 +944,9 @@ def _account_number(group: PageGroup) -> Extracted[str]:
     if _account_field_unreadable(group):
         return Extracted[str]()
     for p in group.pages:
-        column = _column_number(p, ACCOUNT_LABELS, ACCOUNT_NO)
+        # a details table may head the column just "Number" (next to "Type of Account");
+        # headers are matched whole, so 'Phone Number' or 'Cheque Number' never count
+        column = _column_number(p, [*ACCOUNT_LABELS, r"Number"], ACCOUNT_NO)
         if column is not None:
             return column
     return Extracted[str]()
@@ -945,7 +959,7 @@ def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
     part of the name: the name policy (hklv_rules.names) reads 'MD X' and 'X' as
     different names, so 'Md Kamal Uddin' stripped to 'Kamal Uddin' would not match a
     father recorded as 'MD KAMAL UDDIN'."""
-    rx = re.compile(r"certify\s+that\s+(?:(?:Mrs|Mr|Ms)\b\.?)?\s*([A-Za-z][A-Za-z .\-']{1,60}?)\s*(?:,|\bS/O\b|\bD/O\b|\bW/O\b|\bson\b|\bdaughter\b|\bwife\b|\bmaintain|\bhas\b|\bis\b)", re.IGNORECASE)
+    rx = re.compile(r"certify\s+that\s*,?\s*(?:(?:Mrs|Mr|Ms)\b\.?)?\s*([A-Za-z][A-Za-z .\-']{1,60}?)\s*(?:,|\bS/O\b|\bD/O\b|\bW/O\b|\bson\b|\bdaughter\b|\bwife\b|\bmaintain|\bhas\b|\bis\b)", re.IGNORECASE)
     for page in group.pages:
         lines = reading_order(page.lines)
         for i, ln in enumerate(lines):
@@ -1049,8 +1063,9 @@ def bank_statement(group: PageGroup, doc_id: str) -> m.BankStatement:
 # 'Valid up to 30 June 2027', 'valid till June 30, 2027', 'Date of Validity : 30-06-2027',
 # 'Validity of this trade license 1st July 2026 to 30th June 2027'
 _VALIDITY = re.compile(r"\bVALID|\bTILL\b|\bUP\s*TO\b", re.IGNORECASE)
-_FY_WORDS = re.compile(r"\b(?:FISCAL|FINANCIAL|FINANCE|ASSESSMENT)\s*YEAR\b|\bTENURE\b|\bTERM\b", re.IGNORECASE)
-_FY_VALUE = re.compile(r"(20\d{2})\s*[-–/]\s*((?:20)?\d{2})(?!\d)")
+# also a translated Union Parishad form: "for the years 2025 to 2026"
+_FY_WORDS = re.compile(r"\b(?:FISCAL|FINANCIAL|FINANCE|ASSESSMENT)\s*YEAR\b|\bTENURE\b|\bTERM\b|\bFOR\s+THE\s+YEARS?\b", re.IGNORECASE)
+_FY_VALUE = re.compile(r"(20\d{2})\s*(?:[-–/]|\bTO\b)\s*((?:20)?\d{2})(?!\d)", re.IGNORECASE)
 
 
 def _latest_dated(group: PageGroup, pages: Sequence[PageReading], line_re: re.Pattern[str]) -> Extracted[date]:
@@ -1100,7 +1115,7 @@ def trade_license(group: PageGroup, doc_id: str) -> m.TradeLicense:
         doc_id=doc_id,
         pages=group.page_nos,
         license_number=_text(group, [r"Licen[cs]e\s*(?:No|Number)\.?", r"Trade\s*Licen[cs]e\s*(?:No|Number)\.?"], r"[A-Z0-9/\-]*\d{6,}[A-Z0-9/\-]*", pages=english),
-        owner_name=_name(group, [r"Name\s*of\s*(?:the\s*)?(?:Proprietor|Owner)(?:\s*/\s*Assessee)?", r"Proprietor'?s?\s*Name", r"Owner'?s?\s*Name", r"Name\s*of\s*Licen[cs]es?\s*Holder"], pages=english),
+        owner_name=_name(group, [r"Name\s*of\s*(?:the\s*)?(?:Proprietor|Owner)(?:\s*/\s*(?:Assessee|Director'?s?))?", r"Proprietor'?s?\s*Name", r"Owner'?s?\s*Name", r"Name\s*of\s*Licen[cs]es?\s*Holder"], pages=english),
         fiscal_year=text_field(*fy) if fy else Extracted[str](),
         valid_until=_latest_dated(group, english, _VALIDITY),
         issue_date=_date(group, [r"Date\s*of\s*Issue", r"Issue\s*Date"], pages=english),
@@ -1140,6 +1155,23 @@ def employment_certificate(group: PageGroup, doc_id: str) -> m.EmploymentCertifi
 TIN_RE = re.compile(r"\b(\d{12})\b")
 
 
+_REGISTERED_TAXPAYER = re.compile(
+    r"certify\s+that\s*,?\s*([A-Za-z][A-Za-z .\-']{1,60}?)\s+is\s+a\s+registered\s+tax\s*payer", re.IGNORECASE
+)
+
+
+def _taxpayer_name(group: PageGroup) -> Extracted[str]:
+    """The labelled name; when that is unsure (a smudged '1) Name :'), the certificate's
+    own sentence 'This is to Certify that ABUL KHAYER is a Registered Taxpayer' if surer."""
+    labelled = _name(group, [r"Taxpayer'?s?\s*Name", OWN_NAME])
+    for p in group.pages:
+        for ln in p.lines:
+            if mt := _REGISTERED_TAXPAYER.search(ln.text):
+                sentence = text_field(Found(clean_value(mt.group(1)), ln.score, p.page_no), p)
+                return sentence if sentence.confidence > labelled.confidence else labelled
+    return labelled
+
+
 def tin_certificate(group: PageGroup, doc_id: str) -> m.TinCertificate:
     qr = next((b for p in group.pages for b in p.barcodes if b.format.upper().startswith("QR")), None)
     tin_from_qr = None
@@ -1149,7 +1181,7 @@ def tin_certificate(group: PageGroup, doc_id: str) -> m.TinCertificate:
     return m.TinCertificate(
         doc_id=doc_id,
         pages=group.page_nos,
-        taxpayer_name=_name(group, [r"Taxpayer'?s?\s*Name", OWN_NAME]),
+        taxpayer_name=_taxpayer_name(group),
         tin_printed=_text(group, [r"\bTIN\b(?:\s*No\.?)?"], r"\d{12}"),
         qr_decoded=qr is not None,
         tin_from_qr=tin_from_qr,
@@ -1359,8 +1391,9 @@ def _level(group: PageGroup) -> Extracted:
 
 
 def _student_name(group: PageGroup) -> Extracted[str]:
-    # OCR slips seen on stamped pages: "ame of Student" (N cut off), "Name of Srudent".
-    labelled = _name(group, [r"N?ame\s*of\s*(?:the\s*)?(?:S\w?udent|Candidate)", r"Student'?s?\s*Name", r"Candidate'?s?\s*Name"])
+    # OCR slips seen on stamped pages: "ame of Student" (N cut off), "Narme of Student",
+    # "Name of Srudent".
+    labelled = _name(group, [r"N?\w{0,2}me\s*of\s*(?:the\s*)?(?:S\w?udent|Candidate)", r"Student'?s?\s*Name", r"Candidate'?s?\s*Name"])
     if labelled.value is not None:
         return labelled
     # Certificates: "This is to Certify that <name>" with the name on the same or next line.
@@ -1403,7 +1436,9 @@ def _certificate_dob(group: PageGroup) -> Extracted[date]:
             # left margin; a stamp's words beside it don't. All of it: "Two Thousand" alone is
             # already a valid year (2000) when "Seven" is on the next line.
             h = max(1, ln.box[3] - ln.box[1])
-            more = [o for o in _following(page.lines, ln) if (same_row(ln, o) and o.box[0] - ln.box[2] < 2 * h) or abs(o.box[0] - ln.box[0]) < 3 * h][:2]
+            # A same-row piece continues it only if it starts after the line ends: a stamp's word
+            # printed over the sentence ('otarized') is not part of it.
+            more = [o for o in _following(page.lines, ln) if (same_row(ln, o) and -h < o.box[0] - ln.box[2] < 2 * h) or abs(o.box[0] - ln.box[0]) < 3 * h][:2]
             used = [ln, *more]
             d = parse_words_date(" ".join(x.text for x in used))
             if d is None:

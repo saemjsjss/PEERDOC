@@ -24,7 +24,7 @@ def squash(s: str) -> str:
 def clean_value(s: str) -> str:
     """Trim separators and stray punctuation OCR leaves around a field value."""
     s = re.sub(r"\s+", " ", s).strip()
-    return s.strip(" :;,.-_|*#\"'").strip()
+    return s.strip(" :;,.-_|*#\"'：").strip()  # also the full-width colon ('：9596637349')
 
 
 def bangla_ratio(text: str) -> float:

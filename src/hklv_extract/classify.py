@@ -14,11 +14,11 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 
-from hklv_ocr.reading import PageReading
+from hklv_ocr.reading import PageReading, TextLine
 
 from .common_fields import TRANSLATION_RE
 from .mrz import MrzResult, find_mrz
-from .text import reading_order
+from .text import reading_order, same_row
 
 
 class PageKind(str, Enum):
@@ -92,7 +92,7 @@ SIG = {
     # Also the licence's own verification QR (decoded by ZXing), e.g. ".../verify/trade_bn/...".
     # Union Parishads also title it "Professional Licence" (RULES-v3).
     "trade": _rx(
-        r"TRADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E",
+        r"TRE?ADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E",  # also the misspelt "TREADE LICENSE"
         r"PROFESSIONAL\s*LICEN[CS]E",
         r"NAME\s*OF\s*LICEN[CS]ES?\s*HOLDER",
         r"ট্রেড\s*লাইসেন্স",
@@ -190,11 +190,36 @@ def _only_translators_licence(text: str) -> bool:
     return bool(TRANSLATION_RE.search(text)) and not SIG["trade"].search(_LICENCE_NUMBER.sub("", text))
 
 
+def _rows_joined(lines: Sequence[TextLine]) -> list[str]:
+    """One text per row, its pieces joined left to right: OCR may split an MRZ line
+    ('P<BGD' | 'DAHAMED<<MD<RIFAT' | '<<<<'). Where two boxes overlap, a glyph read twice
+    ('…BGD' + 'DAHAMED') is kept once."""
+    rows: list[list[TextLine]] = []
+    for ln in lines:  # already in reading order: a row's pieces are consecutive
+        if rows and same_row(rows[-1][0], ln):
+            rows[-1].append(ln)
+        else:
+            rows.append([ln])
+    out = []
+    for row in rows:
+        text = ""
+        prev: TextLine | None = None
+        for ln in row:
+            t = ln.text.strip()
+            if prev is not None and ln.box[0] < prev.box[2] and text and t and text[-1] == t[0]:
+                t = t[1:]
+            text += t
+            prev = ln
+        out.append(text)
+    return out
+
+
 def classify_page(page: PageReading, today: date) -> PageClass:
     lines_text = "\n".join(ln.text for ln in reading_order(page.lines))
     text = "\n".join([lines_text, page.block_text, *(b.text for b in page.barcodes)])
     has ={k: bool(rx.search(text)) for k, rx in SIG.items()}
-    mrz = next(iter(find_mrz([ln.text for ln in reading_order(page.lines)], today)), None)
+    lines = reading_order(page.lines)
+    mrz = next(iter(find_mrz([ln.text for ln in lines], today) or find_mrz(_rows_joined(lines), today)), None)
 
     def out(kind: PageKind, reason: str) -> PageClass:
         return PageClass(page_no=page.page_no, kind=kind, reason=reason, mrz=mrz)
