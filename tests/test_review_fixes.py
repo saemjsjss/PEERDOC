@@ -489,3 +489,47 @@ def test_student_name_despite_ocr_slips_in_the_label(label):
 
     page = make_page(["BOARD OF INTERMEDIATE AND SECONDARY EDUCATION", label])
     assert academic_transcript(_group(PageKind.ACADEMIC_TRANSCRIPT, page), "t").student_name.value == "Riad Hasan Apu"
+
+
+# --- AKIBI AL (2026-11-13) ----------------------------------------------------------------
+
+
+def test_family_certificate_listing_siblings_birth_registration_numbers_is_an_frc():
+    page = make_page([
+        "NO. 1 DARIAPUR UNION COUNCIL",
+        "FAMILY CERTIFICATE",
+        "AL ABIBI  YOUNGER BROTHER  11/08/2008  BIRTH REGISTRATION NO: 20085716047020322",
+        "01 NO DARIAPUR UNION PARISHAD",
+    ])
+    assert classify_page(page, TODAY).kind is PageKind.FRC
+
+
+def test_employment_certificate_on_college_letterhead_is_an_employment_certificate():
+    page = make_page([
+        "MUJIBNAGAR GOVERNMENT DEGREE COLLEGE",
+        "EIIN NO- 118293, National University Code- 0903",
+        "EMPLOYMENT CERTIFICATE",
+        "This is to certify that Md. Akram Ali is a government employee serving at the College.",
+    ])
+    assert classify_page(page, TODAY).kind is PageKind.EMPLOYMENT_CERTIFICATE
+
+
+@pytest.mark.parametrize(
+    "line,now",
+    [
+        ("101329944, is a government employee serving at Mujibnagar Government Degree", True),
+        ("position since 26 June 2012 and continues to hold the position to date.", True),
+        ("He was a government employee serving at the college until 2020.", False),
+    ],
+)
+def test_current_employment_wording(line, now):
+    from hklv_extract.extractors import employment_certificate
+
+    page = make_page(["EMPLOYMENT CERTIFICATE", line])
+    assert (employment_certificate(_group(PageKind.EMPLOYMENT_CERTIFICATE, page), "e").currently_employed.value is True) is now
+
+
+def test_all_caps_father_relation_cell_is_not_a_father_label():
+    # A family table row read as the father's name gave FatherRef 'P.S'.
+    page = make_page(["Birth Registration Certificate", "MD AKRAM ALI FATHER 01/10/1968 P.S: MUJIBNAGAR"])
+    assert birth_certificate(_group(PageKind.BIRTH_CERTIFICATE, page), "b").father_name.value is None

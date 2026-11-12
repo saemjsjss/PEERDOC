@@ -61,9 +61,12 @@ def number_match_rule(
     first: tuple[str, Extracted[str]],
     second: tuple[str, Extracted[str]],
     ctx: EvaluationContext,
+    *,
+    exact_low_ok: bool = False,
 ) -> RuleResult:
     """Two readings of one number (NID-03, TIN-02): exact -> PASS, 1-2 digits differ -> FLAG,
-    3+ differ -> FAIL. Either number missing or unreliable -> FLAG."""
+    3+ differ -> FAIL. Either number missing or unreliable -> FLAG, unless `exact_low_ok` and
+    both are the same 8+ digits (a misread can't land exactly on a long number twice)."""
     (name_a, a), (name_b, b) = first, second
     evidence = (ev(doc_id, name_a, a), ev(doc_id, name_b, b))
 
@@ -75,6 +78,11 @@ def number_match_rule(
         return result(Outcome.FLAG, f"{what}: {' and '.join(missing)} not found, so the numbers can't be compared")
     shaky = [label for label, x in ((name_a, a), (name_b, b)) if not x.is_reliable(ctx.threshold)]
     if shaky:
+        same = digits(a.value)
+        if exact_low_ok and len(same) >= 8 and digits(b.value) == same:
+            return result(
+                Outcome.PASS, f"{what}: {name_a} and {name_b} match exactly ({same}; low OCR confidence)"
+            )
         return result(Outcome.FLAG, f"{what}: {' and '.join(shaky)} read with low OCR confidence")
     diff = digit_difference(a.value, b.value)
     if diff == 0:

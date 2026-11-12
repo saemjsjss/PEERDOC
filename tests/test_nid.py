@@ -174,10 +174,21 @@ def test_missing_translation_number_flags():
     assert "number_on_translation not found" in r.reason
 
 
-def test_low_confidence_numbers_flag_even_when_equal():
+def test_low_confidence_numbers_pass_when_equal_and_long():
+    # RULES-v4: same 8+ digits on card and translation -> PASS despite low confidence
     r = run(father_nid(number_confidence=LOW))[NID_03]
+    assert r.outcome is Outcome.PASS
+    assert "match exactly" in r.reason
+
+
+def test_low_confidence_short_equal_numbers_still_flag():
+    r = run(father_nid(number="1234567", number_confidence=LOW))[NID_03]
     assert r.outcome is Outcome.FLAG
     assert "low OCR confidence" in r.reason
+
+
+def test_low_confidence_one_digit_off_still_flags():
+    assert run(father_nid(translation_number="5551234568", number_confidence=LOW))[NID_03].outcome is Outcome.FLAG
 
 
 def test_low_confidence_numbers_flag_even_when_far_apart():

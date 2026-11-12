@@ -75,5 +75,6 @@ def _nid_03_number(nid: NationalId, label: str, ctx: EvaluationContext) -> RuleR
         ("number_on_card", nid.number_on_card),
         ("number_on_translation", nid.number_on_translation),
         ctx,
+        exact_low_ok=True,  # RULES-v4
     )
     return _prefixed(result, label)

@@ -221,10 +221,12 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.TRADE_LICENSE, "Trade License")
     if has["death"]:
         return out(PageKind.DEATH_CERTIFICATE, "Death registration number / certificate")
-    if has["birth"]:
-        return out(PageKind.BIRTH_CERTIFICATE, "Birth Registration Number / BDRIS")
+    # Before the birth certificate: a family certificate's table lists the siblings'
+    # "BIRTH REGISTRATION NO".
     if has["frc"] and has["frc_issuer"]:
         return out(PageKind.FRC, "Family certificate + local-government issuer")
+    if has["birth"]:
+        return out(PageKind.BIRTH_CERTIFICATE, "Birth Registration Number / BDRIS")
     # After the FRC (a family certificate may list members' BRNs and dates of birth). The
     # registrar office, a date of birth, and two fields of the birth register, at least one
     # of them a register entry (Register No, Date of Registration, Order of Child); the
@@ -253,7 +255,9 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.BANK_STATEMENT, "transaction table (Date/Debit/Credit/Balance)")
     if has["solvency"] or (has["to_whom"] and has["bank"] and has["account"]):
         return out(PageKind.BANK_SOLVENCY, "Solvency / account holder letter from a bank")
-    if has["employment"] and not has["acad_cert"]:
+    # Its own title wins over a college letterhead's "National University Code".
+    titled = re.search(r"(?:EMPLOYMENT|EXPERIENCE)\s*CERTIFICATE", text, re.IGNORECASE)
+    if has["employment"] and (titled or not has["acad_cert"]):
         return out(PageKind.EMPLOYMENT_CERTIFICATE, "employment wording")
     if has["nid_number"]:
         return out(PageKind.NID, "NID number, no card title or MRZ")

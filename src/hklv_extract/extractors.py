@@ -690,7 +690,8 @@ def _birth_date(group: PageGroup, pages: Sequence[PageReading]) -> Extracted[dat
     return dob
 
 
-_BARE_PARENT = r"\b{}\b(?!'|’|\s*s\b|\s*(?:Name|Nationality|NID|BRN))"
+# Case-sensitive "Father": an all-caps "FATHER" is a relation cell in a family table.
+_BARE_PARENT = r"\b(?-i:{})\b(?!'|’|\s*s\b|\s*(?:Name|Nationality|NID|BRN))"
 
 
 def birth_certificate(group: PageGroup, doc_id: str) -> m.BirthCertificate:
@@ -1004,8 +1005,17 @@ def trade_license(group: PageGroup, doc_id: str) -> m.TradeLicense:
     )
 
 
+# Present tense only: "was working" / "served" is an experience or release letter (EMP-04 FAIL).
+_EMPLOYED_NOW = re.compile(
+    r"\bIS\s+(?:WORKING|EMPLOYED|SERVING)\b|\bCURRENTLY\b"
+    r"|\bIS\s+AN?\s+(?:\w+\s+){0,2}EMPLOYEE\s+SERVING\b"  # "is a government employee serving at"
+    r"|\bCONTINUES\s+TO\s+(?:HOLD|SERVE|WORK)\b",  # "continues to hold the position to date"
+    re.IGNORECASE,
+)
+
+
 def employment_certificate(group: PageGroup, doc_id: str) -> m.EmploymentCertificate:
-    employed = [(p, ln) for p in group.pages for ln in p.lines if re.search(r"\bIS\s+(?:WORKING|EMPLOYED|SERVING)\b|\bCURRENTLY\b", ln.text, re.IGNORECASE)]
+    employed = [(p, ln) for p in group.pages for ln in p.lines if _EMPLOYED_NOW.search(ln.text)]
     return m.EmploymentCertificate(
         doc_id=doc_id,
         pages=group.page_nos,
