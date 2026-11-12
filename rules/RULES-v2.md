@@ -38,7 +38,7 @@ interpretation still awaiting review. Unmarked = rulebook text or agreed change.
   Other spelling differences need an affidavit (5.2).
 * "If Bangla, must have English translation" (BIRTH-01, TRADE-01, EMP-01, DEATH-02): FAIL
   only a document that is in Bangla without a translation; a bilingual (partly Bangla)
-  document without a separate translation page is FLAG. *(needs approval)*
+  document without a separate translation page is FLAG. *(approved)*
 * A translation page is recognised by its own wording ("translated", "translation", "true
   copy", "authorized to translate"); notary text alone does not make a notarised photocopy
   its own translation. When an agency stamp saying "Translation" is on every page, only the
@@ -51,10 +51,10 @@ interpretation still awaiting review. Unmarked = rulebook text or agreed change.
   word starting with "NOTAR" or "ADVOCAT" (misreads like "NOTARY PULIC" count; "REG NO TAREK"
   does not). A seal whose text says something else (government emblem, Union Parishad,
   university, consular seal) does not count. Only a seal with no readable text can be
-  confirmed by "Notary Public" / "Advocate" printed next to it. *(needs approval)*
+  confirmed by "Notary Public" / "Advocate" printed next to it. *(approved)*
 * "Must belong to the father or mother" rules: when a parent's reference name could not be
   read at all, a document that might be that parent's is FLAG ("could not be assigned with
-  certainty"), not FAIL. *(needs approval)*
+  certainty"), not FAIL. *(approved)*
 
 ## SECTION 1: Ingestion & Classification (Pass 1)
 
@@ -76,7 +76,7 @@ Any page that matches no signature is silently ignored (IGNORE-01).
 * Trade License: Trade License OR Trade/Profession License OR ট্রেড লাইসেন্স. A page that
   only repeats a translation agency's own "Trade Licence No." on its letterhead (even with
   an OCR letter slip in the number, e.g. "D60631") is not a trade licence; a translated
-  document on such letterhead is read as what it is. *(needs approval)*
+  document on such letterhead is read as what it is. *(approved)*
 * Employment Certificate: (Employment Certificate OR Experience Certificate OR "is working"
   OR "is employed") AND an employer letterhead.
 * Death Certificate: Death Registration Number OR Death Certificate OR মৃত্যু নিবন্ধন.
@@ -134,7 +134,7 @@ Any page that matches no signature is silently ignored (IGNORE-01).
   (check-digit verified); a low-confidence MRZ expiry is FLAG even if it looks long past.
   MRZ and print mismatch -> FLAG: covers the name (word order, spacing and MRZ digit slips
   ignored, as in 2.1) and a reliably read printed expiry that differs from the MRZ expiry.
-  *(needs approval: interpretation details)*
+  *(approved)*
 
 4.2 NID (assigned to Father, Mother or Student; also run on an NID that could not be assigned)
 * NID-01 (Translation): must have an English translation page, even when the card shows
@@ -161,10 +161,10 @@ Any page that matches no signature is silently ignored (IGNORE-01).
 * FRC-01 (Issuer): must contain Union Parishad, Pourashava or City Corporation. Missing -> FAIL.
 * FRC-02 (Identity): table must have a row whose relation is SELF, HERSELF or APPLICANT,
   with a name matching StudentRef. Missing -> FAIL. An "Applicant Name:" line under the
-  table counts as an APPLICANT row. *(needs approval)*
+  table counts as an APPLICANT row. *(approved)*
 * FRC-03 (Parents): rows for FATHER and MOTHER, names matching FatherRef and MotherRef.
   Missing -> FAIL. When the layout reader returns only part of the table, the dropped
-  FATHER / MOTHER cells are unreadable rows -> FLAG. *(needs approval)*
+  FATHER / MOTHER cells are unreadable rows -> FLAG. *(approved)*
   A parent who has died may have no row: the certificate names them as "Late <name>"
   (matching FatherRef / MotherRef) and their death certificate is in the case -> that
   parent passes. *(approved)*
@@ -185,17 +185,17 @@ Any page that matches no signature is silently ignored (IGNORE-01).
   As on, Print Date) of the statement with the same account number. Dates must be identical
   (one day apart -> FAIL). The statement is chosen by number only when both numbers were
   read reliably (or there is one statement); otherwise no statement is picked on shaky
-  digits, and the result is FLAG unless some statement's date matches. *(needs approval)*
+  digits, and the result is FLAG unless some statement's date matches. *(approved)*
 * BANK-04 (Minimum Balance): not checked. PASS.
 
 4.6 TRADE LICENSE
 * TRADE-01 (Format): if Bangla, must have an English translation. Missing -> FAIL.
 * TRADE-02 (Notary): must be notarised. Missing -> FAIL.
 * TRADE-03 (Fiscal Year): must be the current FY (July-June). Older -> FAIL. Later (renewed
-  early) -> FLAG. *(needs approval)*
+  early) -> FLAG. *(approved)*
 * TRADE-04 (Owner): owner must match FatherRef or MotherRef. Student -> FAIL.
 
-4.6b EMPLOYMENT CERTIFICATE (instead of a Trade License) *(needs approval)*
+4.6b EMPLOYMENT CERTIFICATE (instead of a Trade License) *(approved)*
 * EMP-01 (Format): if Bangla, must have an English translation. Missing -> FAIL.
 * EMP-02 (Notary): Notary Public / Advocate text AND a stamp. Missing -> FAIL.
 * EMP-03 (Date): issue date within 3 months of the current date. Older -> FAIL.
@@ -243,7 +243,7 @@ Any page that matches no signature is silently ignored (IGNORE-01).
 * LANG-02 (Name/DOB): must match StudentRef. Mismatch -> FAIL (unless affidavit). StudentRef
   missing -> FLAG.
 
-4.11 DEATH CERTIFICATE (replaces a parent's NID) *(needs approval)*
+4.11 DEATH CERTIFICATE (replaces a parent's NID) *(approved)*
 * DEATH-01 (Assignment): deceased must match FatherRef or MotherRef. Student or anyone else
   -> FAIL. Two certificates for the same parent -> FLAG.
 * DEATH-02 (Format): if Bangla, must have an English translation. Missing -> FAIL.
