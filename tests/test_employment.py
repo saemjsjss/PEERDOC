@@ -88,10 +88,12 @@ def test_mother_as_employee_passes():
     assert run(employment(name=MOTHER))["EMP-05"].outcome is Outcome.PASS
 
 
-def test_student_as_employee_fails():
-    r = run(employment(name=STUDENT))["EMP-05"]
-    assert r.outcome is Outcome.FAIL
-    assert "student" in r.reason
+def test_letter_in_student_name_is_skipped():  # RULES-v8: the student's own CV document
+    assert run(employment(name=STUDENT)) == {}
+
+
+def test_letter_in_student_name_read_with_low_confidence_is_still_checked():
+    assert run(employment(name=STUDENT, confidence=LOW))["EMP-05"].outcome is Outcome.FLAG
 
 
 def test_stranger_as_employee_fails():
@@ -123,11 +125,11 @@ def test_chain_tin_father_and_employment_mother_fails():
     assert overall(r.values()) is Outcome.FAIL
 
 
-def test_chain_with_employment_in_student_name_fails_chain_02():
-    # The employee being the student is EMP-05's FAIL; CHAIN-03 checks only the TIN.
+def test_chain_with_only_a_student_letter_has_no_income_document():
+    # RULES-v8: the student's own letter is skipped, so there is no income document at all.
     r = chain(tin(FATHER), employment(STUDENT))
     assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert r["CHAIN-03"].outcome is Outcome.PASS
+    assert "no Trade License or Employment Certificate" in r["CHAIN-02"].reason
 
 
 def test_chain_with_both_trade_and_employment_flags():
@@ -163,7 +165,7 @@ def test_chain_stranger_tin_fails_chain_02_even_when_employee_unreadable():
     assert r["CHAIN-03"].outcome is Outcome.FLAG  # can't rule out the unreadable one
 
 
-def test_chain_with_two_income_documents_one_in_student_name_still_only_flags():
-    # The reviewer may pick the father's one, so the student's one alone settles nothing.
-    r = chain(tin(FATHER), employment(FATHER, doc_id="e1"), employment(STUDENT, doc_id="e2"))
-    assert {v.outcome for v in r.values()} == {Outcome.FLAG}
+def test_student_letter_beside_the_fathers_income_document_is_skipped():
+    # RULES-v8: only the father's document forms the chain.
+    r = chain(tin(FATHER), trade(FATHER), employment(STUDENT, doc_id="e2"))
+    assert {v.outcome for v in r.values()} == {Outcome.PASS}
