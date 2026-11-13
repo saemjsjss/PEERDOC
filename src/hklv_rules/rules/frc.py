@@ -30,8 +30,8 @@ _ISSUER_NEAR_MISSES = (
     "পৌরসভা",
     "সিটি কর্পোরেশন",
 )
-_SELF_RELATIONS = {"SELF", "HERSELF", "APPLICANT"}
-_SELF_NEAR_MISSES = {"HIMSELF"}
+# RULES-v7: any word for the applicant themself counts
+_SELF_RELATIONS = {"SELF", "HIMSELF", "HERSELF", "MYSELF", "ONESELF", "APPLICANT", "STUDENT", "CANDIDATE"}
 _VALIDITY_MONTHS = 3
 
 
@@ -115,28 +115,21 @@ def _frc_01_issuer(frc: FamilyRelationshipCertificate, ctx: EvaluationContext) -
 
 
 def _frc_02_identity(frc: FamilyRelationshipCertificate, ctx: EvaluationContext) -> RuleResult:
-    self_rows, near_rows, unreadable = _rows_with_relation(frc.members, _SELF_RELATIONS, _SELF_NEAR_MISSES, ctx)
+    self_rows, _, unreadable = _rows_with_relation(frc.members, _SELF_RELATIONS, set(), ctx)
 
     def result(outcome: Outcome, reason: str, rows: list[FrcMember] = ()) -> RuleResult:
         evidence = tuple(ev(frc.doc_id, "members.name", r.name) for r in rows)
         return RuleResult(rule_id=FRC_02, outcome=outcome, reason=reason, evidence=evidence)
 
     if len(self_rows) > 1:
-        return result(Outcome.FLAG, f"{len(self_rows)} rows marked SELF/HERSELF/APPLICANT", self_rows)
+        return result(Outcome.FLAG, f"{len(self_rows)} rows marked as the applicant (SELF or a synonym)", self_rows)
     if len(self_rows) == 1:
         row = self_rows[0]
         cmp = compare_name(row.name, Person.STUDENT, ctx)
         return result(_outcome_for(cmp.kind), f"SELF row: {cmp.reason}", [row])
-    if near_rows:
-        relation = near_rows[0].relation.value
-        return result(
-            Outcome.FLAG,
-            f"Applicant row uses relation '{relation}', not SELF/HERSELF/APPLICANT as the rulebook lists; confirm manually",
-            near_rows,
-        )
     if unreadable:
         return result(Outcome.FLAG, f"{len(unreadable)} relation cell(s) unreadable; SELF row may be among them", unreadable)
-    return result(Outcome.FAIL, "No row with relation SELF, HERSELF or APPLICANT")
+    return result(Outcome.FAIL, "No row with relation SELF (or a synonym: HIMSELF, HERSELF, APPLICANT ...)")
 
 
 # --- FRC-03 Parents -------------------------------------------------------------

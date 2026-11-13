@@ -44,15 +44,10 @@ def test_unrelated_issuer_fails():
 # FRC-02 identity
 
 
-def test_herself_and_applicant_count_as_self():
-    for rel in ("HERSELF", "Applicant", "self"):
+def test_self_synonyms_count_as_self():  # RULES-v7
+    for rel in ("HERSELF", "HIMSELF", "Himself (Applicant)", "Applicant", "self", "Student", "Candidate", "নিজ"):
         members = (member(STUDENT, rel), member("MD KAMAL UDDIN", "FATHER"), member(MOTHER, "MOTHER"))
         assert run(frc(members=members))["FRC-02"].outcome is Outcome.PASS, rel
-
-
-def test_himself_is_flagged_not_failed():
-    members = (member(STUDENT, "HIMSELF"), member("MD KAMAL UDDIN", "FATHER"), member(MOTHER, "MOTHER"))
-    assert run(frc(members=members))["FRC-02"].outcome is Outcome.FLAG
 
 
 def test_missing_self_row_fails():
