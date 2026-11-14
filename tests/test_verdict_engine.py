@@ -155,7 +155,7 @@ def test_run_all_rules_covers_each_rule_group():
     for expected in (
         "REQ-01", "PASSPORT-01", "NID-ASSIGN", "NID-01", "NID-02", "NID-03", "BIRTH-01", "BIRTH-04", "BIRTH-05",
         "FRC-01", "BANK-01", "BANK-04", "TRADE-01", "TRADE-04", "EMP-01", "TIN-01", "TIN-03",
-        "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04", "TAX-01", "CHAIN-02", "CHAIN-03",
+        "ACAD-01", "ACAD-02", "ACAD-03", "ACAD-04", "TAX-01", "CHAIN-02",
     ):
         assert expected in ids, expected
     assert COVERAGE_RULE not in ids

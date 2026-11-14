@@ -33,7 +33,7 @@ MIN_VALIDITY_MONTHS = 12
 def check_passport(ctx: EvaluationContext) -> list[RuleResult]:
     passports = ctx.case.of_kind(Passport)
     if not passports:
-        return [RuleResult(rule_id=PASSPORT_01, outcome=Outcome.FAIL, reason="No passport found")]
+        return []  # RULES-v9: REQ-01's FAIL alone (v8 also FAILed PASSPORT-01)
     return [_passport_01(p, ctx) for p in passports]
 
 

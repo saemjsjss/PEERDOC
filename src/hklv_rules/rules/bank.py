@@ -5,8 +5,8 @@ statement whose account number matches it (BANK-02); BANK-03 then compares the l
 date with that statement's date. A pairing counts only when both account numbers are read
 reliably (or there is a single statement); otherwise BANK-03 compares the letter date with
 every statement that could be the pair and FLAGs, never FAILs, when none matches.
-A missing solvency or statement also fails REQ-05;
-these rules FAIL too, because there is nothing to compare against.
+A missing solvency or statement is REQ-05's FAIL alone (RULES-v9): the rules that need it
+give no result.
 """
 
 from __future__ import annotations
@@ -21,26 +21,20 @@ from ._shared import assign_by_name, digits
 BANK_01, BANK_02, BANK_03, BANK_04, BANK_05 = "BANK-01", "BANK-02", "BANK-03", "BANK-04", "BANK-05"
 ALL_RULES = (BANK_01, BANK_02, BANK_03, BANK_04, BANK_05)
 
-_NO_SOLVENCY = "No bank solvency letter found"
 _NO_STATEMENT = "No bank statement to compare against"
 
 
 def check_bank(ctx: EvaluationContext) -> list[RuleResult]:
     solvencies = ctx.case.of_kind(BankSolvency)
     statements = ctx.case.of_kind(BankStatement)
-    if not solvencies:
-        return [
-            *(RuleResult(rule_id=r, outcome=Outcome.FAIL, reason=_NO_SOLVENCY) for r in (BANK_01, BANK_02, BANK_03, BANK_05)),
-            _bank_04(solvencies, statements),
-        ]
+    # RULES-v9: a missing solvency letter or statement is REQ-05's FAIL alone; the rules
+    # that need it give no result (in v8 they FAILed too).
     results: list[RuleResult] = []
     for s in solvencies:
-        results += [
-            _bank_01_holder(s, ctx),
-            _bank_02_account(s, statements, ctx),
-            _bank_03_date(s, statements, ctx),
-            _bank_05_currencies(s),
-        ]
+        results.append(_bank_01_holder(s, ctx))
+        if statements:
+            results += [_bank_02_account(s, statements, ctx), _bank_03_date(s, statements, ctx)]
+        results.append(_bank_05_currencies(s))
     results.append(_bank_04(solvencies, statements))
     return results
 

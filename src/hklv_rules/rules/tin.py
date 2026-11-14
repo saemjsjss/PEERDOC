@@ -2,22 +2,16 @@
 
 One result per rule per TIN Certificate. No TIN -> no results (REQ-07 reports it).
 
-TIN-03 compares the taxpayer name with the Trade License owner. When no Trade License
-was submitted, the Employment Certificate employee takes its place (REQ-06 and the
-supplement's 5.1 note). Which parent the name belongs to is CHAIN-02's job, not this one.
+TIN-03 (RULES-v9): the taxpayer must be the father or mother. Whether the TIN and the
+income document belong to the same parent is CHAIN-02's job.
 """
 
 from __future__ import annotations
 
-from enum import Enum
-
 from ..context import EvaluationContext
-from ..identity import MatchKind, affidavit_bridge
-from ..models import EmploymentCertificate, Extracted, Outcome, RuleResult, TinCertificate, TradeLicense
-from ..names import normalize_name
+from ..models import Extracted, Outcome, Person, RuleResult, TinCertificate
 from ._evidence import ev
-from ._shared import number_match_rule
-from .financial_chain import _PARENTS, _Income
+from ._shared import assign_by_name, number_match_rule
 
 TIN_01, TIN_02, TIN_03 = "TIN-01", "TIN-02", "TIN-03"
 ALL_RULES = (TIN_01, TIN_02, TIN_03)
@@ -26,7 +20,7 @@ ALL_RULES = (TIN_01, TIN_02, TIN_03)
 def check_tin(ctx: EvaluationContext) -> list[RuleResult]:
     results: list[RuleResult] = []
     for tin in ctx.case.of_kind(TinCertificate):
-        results += [_tin_01_qr(tin), _tin_02_number(tin, ctx), _tin_03_name(tin, ctx)]
+        results += [_tin_01_qr(tin), _tin_02_number(tin, ctx), _tin_03_taxpayer(tin, ctx)]
     return results
 
 
@@ -74,73 +68,20 @@ def _tin_02_number(tin: TinCertificate, ctx: EvaluationContext) -> RuleResult:
     )
 
 
-# --- TIN-03 Name match --------------------------------------------------------------
+# --- TIN-03 Taxpayer --------------------------------------------------------------
 
 
-class _Verdict(str, Enum):
-    MATCH = "MATCH"
-    MISMATCH = "MISMATCH"
-    UNSURE = "UNSURE"
+def _tin_03_taxpayer(tin: TinCertificate, ctx: EvaluationContext) -> RuleResult:
+    """RULES-v9: the taxpayer is assigned by name to the father or mother (Section 0).
 
-
-def _readable(name: Extracted[str], ctx: EvaluationContext) -> bool:
-    return name.is_reliable(ctx.threshold) and bool(normalize_name(name.value))
-
-
-def _unreadable_why(label: str, name: Extracted[str]) -> str:
-    if name.found and normalize_name(name.value):
-        return f"{label} '{name.value}' read with low OCR confidence"
-    return f"{label} not found by OCR"
-
-
-def _compare(tin_name: str, income: _Income, ctx: EvaluationContext) -> tuple[_Verdict, str]:
-    """Identical after normalisation, or a spelling difference covered by a valid
-    same-person affidavit for either parent (5.2)."""
-    who = f"{income.describe} '{income.name.value}' ({income.doc_id})"
-    if not _readable(income.name, ctx):
-        return _Verdict.UNSURE, _unreadable_why(f"{income.describe} name ({income.doc_id})", income.name)
-    if normalize_name(tin_name) == normalize_name(income.name.value):
-        return _Verdict.MATCH, f"matches {who}"
-    verdicts = [affidavit_bridge(ctx, p, tin_name, income.name.value) for p in _PARENTS]
-    for kind, why in verdicts:
-        if kind is MatchKind.AFFIDAVIT:
-            return _Verdict.MATCH, f"matches {who}; spelling difference covered by {why}"
-    unsure = [why for kind, why in verdicts if kind is MatchKind.UNCERTAIN]
-    if unsure:
-        return _Verdict.UNSURE, f"differs from {who}; {'; '.join(unsure)}"
-    return _Verdict.MISMATCH, f"does not match {who}"
-
-
-def _tin_03_name(tin: TinCertificate, ctx: EvaluationContext) -> RuleResult:
-    trades = ctx.case.of_kind(TradeLicense)
-    employments = ctx.case.of_kind(EmploymentCertificate)
-    incomes = [_Income.of(d) for d in (trades or employments)]
-    substitution = (
-        " (no Trade License submitted; compared with the Employment Certificate instead)"
-        if employments and not trades
-        else ""
+    Replaces v8's TIN-03 (taxpayer == income-document holder) and CHAIN-03 (TIN not the
+    student's): whether the TIN and the income document belong to the same parent is CHAIN-02."""
+    assignment = assign_by_name(
+        TIN_03,
+        "TIN Certificate",
+        [(tin.doc_id, "taxpayer_name", tin.taxpayer_name)],
+        ctx,
+        allowed=(Person.FATHER, Person.MOTHER),
+        unknown_reason="is not in the father's or mother's name",
     )
-    evidence = (
-        ev(tin.doc_id, "taxpayer_name", tin.taxpayer_name),
-        *(ev(i.doc_id, i.field, i.name) for i in incomes),
-    )
-
-    def result(outcome: Outcome, reason: str) -> RuleResult:
-        return RuleResult(
-            rule_id=TIN_03, outcome=outcome, reason=f"{_label(tin)}: {reason}{substitution}", evidence=evidence
-        )
-
-    if not incomes:
-        return result(Outcome.FLAG, "No Trade License to compare with")
-    if not _readable(tin.taxpayer_name, ctx):
-        return result(Outcome.FLAG, _unreadable_why("taxpayer name", tin.taxpayer_name))
-
-    name = tin.taxpayer_name.value
-    compared = [_compare(name, i, ctx) for i in incomes]
-    verdicts = {v for v, _ in compared}
-    details = "; ".join(why for _, why in compared)
-    if verdicts == {_Verdict.MATCH}:
-        return result(Outcome.PASS, f"taxpayer '{name}' {details}")
-    if verdicts == {_Verdict.MISMATCH}:
-        return result(Outcome.FAIL, f"taxpayer '{name}' {details}")
-    return result(Outcome.FLAG, f"taxpayer '{name}' could not be confirmed against every document: {details}")
+    return assignment.results[0]

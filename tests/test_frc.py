@@ -18,9 +18,8 @@ def test_valid_frc_passes_every_rule():
     assert {k: v.outcome for k, v in r.items()} == {f"FRC-0{i}": Outcome.PASS for i in range(1, 6)}
 
 
-def test_no_frc_fails_every_rule():
-    r = run()
-    assert {v.outcome for v in r.values()} == {Outcome.FAIL}
+def test_no_frc_gives_no_frc_results():  # RULES-v9: REQ-04 FAILs it, once
+    assert run() == {}
 
 
 # FRC-01 issuer

@@ -11,6 +11,15 @@ e-Apostille, https://apostille.mygov.bd/application-details/<number> (the URL in
     not try to get around that. So VERIFIED means "the official register has an apostille
     with this application number", not "its contents match the scan".
 
+e-Apostille register details (RULES-v10, measured 2026-11-14),
+POST https://api.apostille.mygov.bd/api/v1/application-details/<number> (the public lookup
+behind mofa-servicedirectory.apostille.mygov.bd; GET answers 405):
+    JSON data.details: apostille_date, application_type, and "attachment" (sic) entries with
+    a title ("HSC Transcript (ForAttestation)*") and an "attachement_url" to the page image
+    on api.apostille.mygov.bd/api/v1/secure-external-file/<signed token>. The token is tied
+    to the requesting IP and expires, so images are downloaded at once and never stored.
+    ACAD-01 reads those images by OCR to check the copy is the student's.
+
 Automated challan (A-challan), as embedded by challanverification.finance.gov.bd:
     https://www.achallan.gov.bd/acs/General/PrintChallanSlipDetailsHTML?challanNo=<YYYY-NNNNNNNNNN>
     carries the challan as JSON in `var obj = {...};`: ChallanNo, Amount, ChallanDate,
@@ -39,13 +48,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from hklv_rules.models import CaseFile, EApostille, IncomeTaxChallan, OnlineCheck, OnlineStatus
+from hklv_rules.models import CaseFile, EApostille, IncomeTaxChallan, OnlineCheck, OnlineStatus, RegisterPage
 
 APOSTILLE_HOST = "apostille.mygov.bd"
+# RULES-v10: the register's JSON lookup behind mofa-servicedirectory.apostille.mygov.bd
+REGISTER_API_HOST = "api.apostille.mygov.bd"
 ACHALLAN_HOST = "www.achallan.gov.bd"
-ALLOWED_HOSTS = frozenset({APOSTILLE_HOST, ACHALLAN_HOST})
+ALLOWED_HOSTS = frozenset({APOSTILLE_HOST, REGISTER_API_HOST, ACHALLAN_HOST})
 # Identify ourselves honestly; the sites answer this plain request normally.
 USER_AGENT = "Mozilla/5.0 (HKLV document verification)"
 TIMEOUT_SECONDS = 20  # per socket operation
@@ -53,10 +65,17 @@ TOTAL_DEADLINE_SECONDS = 45  # for the whole download, however slowly bytes tric
 # (checked after every read; a read returns as soon as any bytes arrive, so a trickling
 # server is cut off at TOTAL_DEADLINE_SECONDS + at most one TIMEOUT_SECONDS wait)
 MAX_RESPONSE_BYTES = 2_000_000  # the real pages are ~40 KB
+MAX_IMAGE_BYTES = 15_000_000  # a register page image (PNG) is ~1-3 MB
+MAX_REGISTER_PAGES = 10
 PAUSE_BETWEEN_REQUESTS = 0.5  # be polite to small government servers
 
 # fetch(url) -> (HTTP status, body text). Injectable so tests never touch the network.
 Fetch = Callable[[str], tuple[int, str]]
+# RULES-v10 register copy: POST for the JSON, GET for the page images, and an OCR step
+# (title, image bytes) -> RegisterPage that the pipeline supplies (it owns the OCR reader).
+Post = Callable[[str], tuple[int, str]]
+GetBytes = Callable[[str], tuple[int, bytes]]
+ReadRegister = Callable[[list[tuple[str, bytes]]], tuple[RegisterPage, ...]]
 
 
 class _OfficialHostsOnly(urllib.request.HTTPRedirectHandler):
@@ -72,11 +91,14 @@ class _OfficialHostsOnly(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_OfficialHostsOnly())
 
 
-def http_fetch(url: str) -> tuple[int, str]:
+def _download(url: str, method: str, accept: str, max_bytes: int) -> tuple[int, bytes, str]:
+    """(status, body bytes, charset) from an allowed official https URL, with size and time limits."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or (parsed.hostname or "").lower() not in ALLOWED_HOSTS:
         raise ValueError(f"not an allowed official URL: {url}")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+    request = urllib.request.Request(
+        url, method=method, data=b"" if method == "POST" else None, headers={"User-Agent": USER_AGENT, "Accept": accept}
+    )
     started = time.monotonic()
     try:
         with _opener.open(request, timeout=TIMEOUT_SECONDS) as response:
@@ -84,8 +106,8 @@ def http_fetch(url: str) -> tuple[int, str]:
             # read1: whatever has arrived (up to 64 KB), not "wait until 64 KB arrived".
             while chunk := response.read1(65536):
                 body += chunk
-                if len(body) > MAX_RESPONSE_BYTES:
-                    raise ValueError(f"response larger than {MAX_RESPONSE_BYTES} bytes")
+                if len(body) > max_bytes:
+                    raise ValueError(f"response larger than {max_bytes} bytes")
                 if time.monotonic() - started > TOTAL_DEADLINE_SECONDS:
                     raise TimeoutError(f"download took longer than {TOTAL_DEADLINE_SECONDS} s")
             charset = response.headers.get_content_charset() or "utf-8"
@@ -93,10 +115,26 @@ def http_fetch(url: str) -> tuple[int, str]:
                 codecs.lookup(charset)
             except LookupError:
                 charset = "utf-8"
-            return response.status, bytes(body).decode(charset, errors="replace")
+            return response.status, bytes(body), charset
     except urllib.error.HTTPError as e:
         e.close()  # it holds the connection open otherwise
-        return e.code, ""
+        return e.code, b"", "utf-8"
+
+
+def http_fetch(url: str) -> tuple[int, str]:
+    status, body, charset = _download(url, "GET", "text/html", MAX_RESPONSE_BYTES)
+    return status, body.decode(charset, errors="replace")
+
+
+def http_post_json(url: str) -> tuple[int, str]:
+    """The register API answers POST only (GET is 405)."""
+    status, body, charset = _download(url, "POST", "application/json", MAX_RESPONSE_BYTES)
+    return status, body.decode(charset, errors="replace")
+
+
+def http_get_bytes(url: str) -> tuple[int, bytes]:
+    status, body, _ = _download(url, "GET", "image/*", MAX_IMAGE_BYTES)
+    return status, body
 
 
 def _unavailable(detail: str) -> OnlineCheck:
@@ -168,6 +206,13 @@ def check_apostille(qr_url: str | None, fetch: Fetch = http_fetch) -> OnlineChec
     number = apostille_id(qr_url)
     if number is None:
         return _unavailable("not an official e-Apostille link with an application number; not opened")
+    return check_apostille_number(number, fetch)
+
+
+def check_apostille_number(number: str, fetch: Fetch = http_fetch) -> OnlineCheck:
+    """Does the register have this application number? (The QR's number, or the printed No.)"""
+    if not re.fullmatch(r"\d{8,20}", number or ""):
+        return _unavailable("not an apostille number; not looked up")
     got = _get(fetch, f"https://{APOSTILLE_HOST}/application-details/{number}")
     if isinstance(got, OnlineCheck):
         return got
@@ -194,6 +239,73 @@ def check_apostille(qr_url: str | None, fetch: Fetch = http_fetch) -> OnlineChec
     if component == "Application/Details" and isinstance(error, str) and error.strip():
         return OnlineCheck(status=OnlineStatus.NOT_FOUND, detail=f"the official register has no e-Apostille {number}")
     return _unavailable("unrecognised answer from the e-Apostille site")
+
+
+# --- e-Apostille register copy (RULES-v10) --------------------------------------------------
+
+_REGISTER_FILE = re.compile(r"^/api/v1/secure-external-file/[A-Za-z0-9_=.%-]+$")
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
+
+
+def register_copy(
+    number: str, post: Post, get_bytes: GetBytes, read_register: ReadRegister | None
+) -> tuple[date | None, tuple[RegisterPage, ...], str]:
+    """(apostille date, the register's pages read by OCR, note) for a number the register
+    has. The note says why pages are missing; it is empty when every page was read.
+
+    The page links are signed for this computer and expire, so they are downloaded at once
+    and never stored or shown."""
+    try:
+        status, body = post(f"https://{REGISTER_API_HOST}/api/v1/application-details/{number}")
+    except Exception as e:  # noqa: BLE001
+        return None, (), f"register could not be reached ({type(e).__name__})"
+    obj = _parse_json(body) if status == 200 else None
+    data = obj.get("data") if isinstance(obj, dict) else None
+    details = data.get("details") if isinstance(data, dict) else None
+    if not isinstance(details, dict):
+        return None, (), f"register gave no details (HTTP {status})"
+    try:
+        when = date.fromisoformat(str(details.get("apostille_date") or "")[:10])
+    except ValueError:
+        when = None
+    files: list[tuple[str, str]] = []
+    for a in details.get("attachment") or []:
+        url = a.get("attachement_url") if isinstance(a, dict) else None  # the API's spelling
+        if not isinstance(url, str):
+            continue
+        u = urllib.parse.urlparse(url)
+        if u.scheme == "https" and (u.hostname or "").lower() == REGISTER_API_HOST and _REGISTER_FILE.match(u.path):
+            files.append((str(a.get("title") or "").strip()[:200], url))
+    if not files:
+        return when, (), "register lists no document pages"
+    if read_register is None:
+        return when, (), "register pages not read (OCR is not available in this run)"
+    images: list[tuple[str, bytes]] = []
+    for title, url in files[:MAX_REGISTER_PAGES]:
+        try:
+            st, img = get_bytes(url)
+        except Exception as e:  # noqa: BLE001
+            return when, (), f"register page could not be downloaded ({type(e).__name__})"
+        if st != 200 or not img.startswith(_IMAGE_MAGIC):
+            return when, (), f"register page was not an image (HTTP {st})"
+        images.append((title, img))
+    try:
+        pages = tuple(read_register(images))
+    except Exception as e:  # noqa: BLE001
+        return when, (), f"register pages could not be read ({type(e).__name__})"
+    return when, pages, ""
+
+
+def _with_register(check: OnlineCheck, number: str, source: str, post, get_bytes, read_register) -> OnlineCheck:
+    update: dict = {"number": number, "number_source": source}
+    if check.status is OnlineStatus.VERIFIED:
+        if post is None or get_bytes is None:
+            update["register_note"] = "register copy not fetched in this run"
+        else:
+            update["register_date"], update["register_pages"], update["register_note"] = register_copy(
+                number, post, get_bytes, read_register
+            )
+    return check.model_copy(update=update)
 
 
 # --- Automated challan ---------------------------------------------------------------------
@@ -268,19 +380,35 @@ def check_challan(challan_no: str | None, fetch: Fetch = http_fetch) -> OnlineCh
 # --- Whole case ------------------------------------------------------------------------------
 
 
-def apply_online_checks(case: CaseFile, fetch: Fetch = http_fetch, pause: float = PAUSE_BETWEEN_REQUESTS) -> CaseFile:
+def apply_online_checks(
+    case: CaseFile,
+    fetch: Fetch = http_fetch,
+    pause: float = PAUSE_BETWEEN_REQUESTS,
+    *,
+    post: Post | None = None,
+    get_bytes: GetBytes | None = None,
+    read_register: ReadRegister | None = None,
+) -> CaseFile:
     """A copy of `case` with every e-Apostille and challan's `online` result filled in.
 
     Apostilles whose QR isn't an official link are left alone: ACAD-01 judges them without
-    opening anything. Blocking (urllib); call it from a worker thread in async code.
+    opening anything. With no readable QR, the printed No. is looked up instead (RULES-v10).
+    `post` / `get_bytes` (None: skipped) fetch the register's own copy of a found apostille,
+    and `read_register` OCRs it. Blocking (urllib); call it from a worker thread in async code.
     """
+
+    def apostille(number: str, source: str):
+        return lambda: _with_register(check_apostille_number(number, fetch), number, source, post, get_bytes, read_register)
+
     documents = []
     first = True
     for doc in case.documents:
         check = None
-        if isinstance(doc, EApostille) and doc.qr_decoded:
-            if apostille_id(doc.qr_url):
-                check = lambda d=doc: check_apostille(d.qr_url, fetch)  # noqa: E731
+        if isinstance(doc, EApostille) and not doc.qr_decoded and doc.printed_number.found:
+            check = apostille(doc.printed_number.value, "printed")
+        elif isinstance(doc, EApostille) and doc.qr_decoded:
+            if n := apostille_id(doc.qr_url):
+                check = apostille(n, "qr")
             elif on_apostille_host(doc.qr_url):
                 # Official site but not an application link we can look up: say so, rather
                 # than ACAD-01 reporting "online checks not enabled".

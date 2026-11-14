@@ -244,7 +244,8 @@ def test_online_checks_run_when_asked(client):
     assert body["online"] == [{"doc_id": "e_apostille-1", "kind": "e_apostille", "status": "VERIFIED", "detail": body["online"][0]["detail"]}]
     assert web.asked == [URL]
     [acad_01] = [r for r in body["results"] if r["rule_id"] == "ACAD-01"]
-    assert acad_01["outcome"] == "PASS"
+    # RULES-v10: found, but a test fetch has no register copy, so the owner is unchecked
+    assert acad_01["outcome"] == "FLAG" and "owner was not checked" in acad_01["reason"]
 
 
 def test_online_checks_off(client):

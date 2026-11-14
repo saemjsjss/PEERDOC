@@ -54,12 +54,8 @@ def test_evidence_lists_every_field_used():
 # --- No passport ------------------------------------------------------------------
 
 
-def test_no_passport_fails_once():
-    results = run()
-    assert len(results) == 1
-    assert results[0].rule_id == PASSPORT_01
-    assert results[0].outcome is Outcome.FAIL
-    assert results[0].reason == "No passport found"
+def test_no_passport_gives_no_passport_result():  # RULES-v9: REQ-01 FAILs it, once
+    assert run() == []
 
 
 # --- Expiry -----------------------------------------------------------------------

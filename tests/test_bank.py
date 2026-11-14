@@ -45,31 +45,22 @@ def test_mother_as_holder_passes():
     assert "Mother" in r["BANK-01"].reason
 
 
-def test_no_solvency_fails_01_to_03_and_passes_04():
+def test_no_solvency_leaves_it_to_req_05():  # RULES-v9: judged once, by REQ-05
     r = run(bank_statement())
-    assert outcomes(r) == {
-        "BANK-01": Outcome.FAIL,
-        "BANK-02": Outcome.FAIL,
-        "BANK-03": Outcome.FAIL,
-        "BANK-04": Outcome.PASS,
-        "BANK-05": Outcome.FAIL,
-    }
-    assert r["BANK-01"].reason == "No bank solvency letter found"
+    assert outcomes(r) == {"BANK-04": Outcome.PASS}
 
 
 def test_no_bank_documents_at_all():
     r = run()
-    assert r["BANK-01"].outcome is Outcome.FAIL
+    assert set(r) == {"BANK-04"}
     assert r["BANK-04"].outcome is Outcome.PASS
     assert "no bank documents" in r["BANK-04"].reason
 
 
-def test_no_statement_fails_02_and_03_but_still_checks_holder():
+def test_no_statement_skips_02_and_03_but_still_checks_holder():  # RULES-v9: REQ-05 FAILs it
     r = run(bank_solvency())
     assert r["BANK-01"].outcome is Outcome.PASS
-    for rule in ("BANK-02", "BANK-03"):
-        assert r[rule].outcome is Outcome.FAIL
-        assert "No bank statement to compare against" in r[rule].reason
+    assert "BANK-02" not in r and "BANK-03" not in r
     assert r["BANK-04"].outcome is Outcome.PASS
 
 

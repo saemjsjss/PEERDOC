@@ -1,176 +1,122 @@
-"""Section 5.1 financial chain: TIN taxpayer, Trade License owner and (RULES-v6) bank account
-holder must be the same parent."""
+"""Section 5.1 financial chain (RULES-v9): CHAIN-02 checks that the TIN, the income document
+and every Bank Solvency belong to the same parent. Whose each document is (student,
+stranger, uncertain) is its own rule's job (TIN-03, TRADE-04, EMP-05, BANK-01), so CHAIN-02
+reports only the same-parent question, once."""
 
-from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, bank_solvency, by_rule, context, employment, tin, trade
+from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, bank_solvency, context, employment, tin, trade
 
-from hklv_rules.models import BankSolvency, Outcome, Person, overall
+from hklv_rules.models import Outcome, Person
 from hklv_rules.rules import check_financial_chain
 
 
 def run(*docs, **kw):
-    """CHAIN-02/03 only; CHAIN-04 (the bank link) has its own tests below."""
-    return by_rule(r for r in check_financial_chain(context(*docs, **kw)) if r.rule_id != "CHAIN-04")
+    return [r for r in check_financial_chain(context(*docs, **kw))]
 
 
-def chain04(*docs, **kw):
-    return [r for r in check_financial_chain(context(*docs, **kw)) if r.rule_id == "CHAIN-04"]
+def one(*docs, **kw):
+    r = run(*docs, **kw)
+    assert len(r) == 1 and r[0].rule_id == "CHAIN-02", r
+    return r[0]
 
 
-def test_tin_father_and_trade_father_passes():
-    r = run(tin(FATHER), trade(FATHER))
-    assert {k: v.outcome for k, v in r.items()} == {
-        "CHAIN-02": Outcome.PASS,
-        "CHAIN-03": Outcome.PASS,
-    }
-    assert "Father" in r["CHAIN-02"].reason
+def test_all_three_father_passes():
+    r = one(tin(FATHER), trade(FATHER), bank_solvency(FATHER))
+    assert r.outcome is Outcome.PASS and "father" in r.reason
 
 
-def test_tin_mother_and_trade_mother_passes():
-    r = run(tin(MOTHER), trade(MOTHER))
-    assert overall(r.values()) is Outcome.PASS
+def test_all_three_mother_passes():
+    assert one(tin(MOTHER), trade(MOTHER), bank_solvency(MOTHER)).outcome is Outcome.PASS
 
 
 def test_tin_father_and_trade_mother_fails():
     """The headline requirement: TIN=Father, Trade=Mother must FAIL."""
-    r = run(tin(FATHER), trade(MOTHER))
-
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert "TIN belongs to the Father but Trade License belongs to the Mother" in r["CHAIN-02"].reason
-    assert r["CHAIN-03"].outcome is Outcome.PASS  # neither is the student
-    assert overall(r.values()) is Outcome.FAIL
+    r = one(tin(FATHER), trade(MOTHER), bank_solvency(FATHER))
+    assert r.outcome is Outcome.FAIL and "different parents" in r.reason
 
 
 def test_tin_mother_and_trade_father_fails():
-    r = run(tin(MOTHER), trade(FATHER))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert overall(r.values()) is Outcome.FAIL
+    assert one(tin(MOTHER), trade(FATHER), bank_solvency(MOTHER)).outcome is Outcome.FAIL
+
+
+def test_bank_of_the_other_parent_fails():
+    r = one(tin(FATHER), trade(FATHER), bank_solvency(MOTHER))
+    assert r.outcome is Outcome.FAIL and "account holder" in r.reason
+
+
+def test_one_of_two_solvencies_of_the_other_parent_fails():
+    r = one(tin(FATHER), trade(FATHER), bank_solvency(FATHER), bank_solvency(MOTHER, doc_id="solvency-2"))
+    assert r.outcome is Outcome.FAIL and "solvency-2" in r.reason
+
+
+def test_spelling_variant_covered_by_affidavit_counts_for_its_parent():
+    aff = affidavit((Person.FATHER, FATHER, "MD. KAMAL UDDEEN"))
+    assert one(tin("MD. KAMAL UDDEEN"), trade(FATHER), bank_solvency(FATHER), aff).outcome is Outcome.PASS
 
 
 def test_cross_parent_fails_even_when_affidavit_exists_for_each_parent():
-    # Affidavits fix spellings of one person; they never merge father and mother.
-    aff = affidavit((Person.FATHER, FATHER, "KAMAL UDDIN"), (Person.MOTHER, MOTHER, "RINA"))
-    r = run(tin(FATHER), trade(MOTHER), aff)
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
+    aff = affidavit((Person.FATHER, FATHER, "MD. KAMAL UDDEEN"), (Person.MOTHER, MOTHER, "RINA BEGOM"))
+    assert one(tin("MD. KAMAL UDDEEN"), trade("RINA BEGOM"), bank_solvency(FATHER), aff).outcome is Outcome.FAIL
 
 
-def test_trade_license_in_student_name_fails_chain_02_only():
-    # The owner being the student is TRADE-04's FAIL; CHAIN-03 checks only the TIN.
-    r = run(tin(FATHER), trade(STUDENT))
-    assert r["CHAIN-03"].outcome is Outcome.PASS
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
+# --- a link that is not a parent's: reported once, by its own rule, not by CHAIN-02 ----
 
 
-def test_tin_in_student_name_fails_chain_03():
-    r = run(tin(STUDENT), trade(FATHER))
-    assert r["CHAIN-03"].outcome is Outcome.FAIL
-    assert "TIN" in r["CHAIN-03"].reason
+def test_tin_in_student_name_gives_no_chain_result():  # TIN-03 FAILs it
+    assert run(tin(STUDENT), trade(FATHER), bank_solvency(FATHER)) == []
 
 
-def test_both_in_student_name_fails_even_though_names_are_identical():
-    r = run(tin(STUDENT), trade(STUDENT))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL  # identical, but not a parent
-    assert r["CHAIN-03"].outcome is Outcome.FAIL
-    assert overall(r.values()) is Outcome.FAIL
+def test_trade_in_student_name_gives_no_chain_result():  # TRADE-04 FAILs it
+    assert run(tin(FATHER), trade(STUDENT), bank_solvency(FATHER)) == []
 
 
-def test_md_abbreviation_is_identical_to_mohammad():
-    r = run(tin("MOHAMMAD KAMAL UDDIN"), trade("MD KAMAL UDDIN"))
-    assert overall(r.values()) is Outcome.PASS
+def test_bank_in_student_name_gives_no_chain_result():  # BANK-01 FAILs it
+    assert run(tin(FATHER), trade(FATHER), bank_solvency(STUDENT)) == []
 
 
-def test_spelling_variant_without_affidavit_fails():
-    r = run(tin("MD. KAMAL UDDIN"), trade("MD. KAMAL UDDEEN"))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL  # trade owner matches no parent
+def test_stranger_owner_gives_no_chain_result():  # TRADE-04 FAILs it
+    assert run(tin(FATHER), trade("JAHANGIR ALAM"), bank_solvency(FATHER)) == []
 
 
-def test_spelling_variant_covered_by_notarised_affidavit_passes():
-    aff = affidavit((Person.FATHER, FATHER, "MD. KAMAL UDDEEN"))
-    r = run(tin(FATHER), trade("MD. KAMAL UDDEEN"), aff)
-    assert {v.outcome for v in r.values()} == {Outcome.PASS}
+def test_low_confidence_name_gives_no_chain_result():  # TIN-03 FLAGs it
+    assert run(tin(FATHER, confidence=LOW), trade(FATHER), bank_solvency(FATHER)) == []
 
 
-def test_owner_who_is_not_a_family_member_fails():
-    r = run(tin("JAHANGIR ALAM"), trade("JAHANGIR ALAM"))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert "matches no parent" in r["CHAIN-02"].reason
+def test_missing_link_gives_no_chain_result():  # REQ-05 / REQ-06 / REQ-07 FAIL it
+    assert run(trade(FATHER), bank_solvency(FATHER)) == []
+    assert run(tin(FATHER), bank_solvency(FATHER)) == []
+    assert run(tin(FATHER), trade(FATHER)) == []
 
 
-def test_low_confidence_name_flags_instead_of_guessing():
-    r = run(tin(FATHER, confidence=LOW), trade(FATHER))
-    assert {v.outcome for v in r.values()} == {Outcome.FLAG}
-    assert "low OCR confidence" in r["CHAIN-02"].reason
-
-
-def test_missing_tin_fails():
-    r = run(trade(FATHER))
-    assert {v.outcome for v in r.values()} == {Outcome.FAIL}
-    assert "no TIN Certificate" in r["CHAIN-02"].reason
-
-
-def test_two_trade_licenses_flag():
-    r = run(tin(FATHER), trade(FATHER, doc_id="t1"), trade(MOTHER, doc_id="t2"))
-    assert {v.outcome for v in r.values()} == {Outcome.FLAG}
-
-
-def test_bank_does_not_change_chain_02_or_03():
-    student_bank = BankSolvency(doc_id="bank")
-    r = run(tin(FATHER), trade(FATHER), student_bank)
-    assert overall(r.values()) is Outcome.PASS
-
-
-# --- CHAIN-04: bank account holder = trade licence owner (RULES-v6) ---------------
-
-
-def test_bank_holder_same_parent_as_trade_owner_passes():
-    [r] = chain04(trade(FATHER), bank_solvency(holder=FATHER))
+def test_unassigned_solvency_is_left_out_of_the_comparison():  # BANK-01 FLAGs it
+    r = one(tin(FATHER), trade(FATHER), bank_solvency(FATHER), bank_solvency(MOTHER, confidence=LOW, doc_id="s2"))
     assert r.outcome is Outcome.PASS
-    assert "Father" in r.reason
 
 
-def test_bank_holder_other_parent_fails():
-    [r] = chain04(trade(FATHER), bank_solvency(holder=MOTHER))
-    assert r.outcome is Outcome.FAIL
-    assert "account holder is the Mother but the Trade License owner is the Father" in r.reason
-
-
-def test_bank_in_student_name_fails():
-    [r] = chain04(trade(FATHER), bank_solvency(holder=STUDENT))
-    assert r.outcome is Outcome.FAIL
-
-
-def test_low_confidence_bank_holder_flags():
-    [r] = chain04(trade(FATHER), bank_solvency(holder=FATHER, confidence=LOW))
-    assert r.outcome is Outcome.FLAG
-    assert "low OCR confidence" in r.reason
+# --- several income documents ------------------------------------------------------
 
 
 def test_employment_certificate_is_the_income_link_too():
-    [r] = chain04(employment(MOTHER), bank_solvency(holder=MOTHER))
+    assert one(tin(MOTHER), employment(MOTHER), bank_solvency(MOTHER)).outcome is Outcome.PASS
+
+
+def test_second_income_document_of_the_other_parent_does_not_flag_when_one_parent_fits():
+    # v8 FLAGged "reviewer picks" whenever both were submitted; only the father has a TIN.
+    r = one(tin(FATHER), trade(FATHER), employment(MOTHER), bank_solvency(FATHER))
     assert r.outcome is Outcome.PASS
 
 
-def test_one_result_per_solvency_and_missing_links_fail():
-    rs = chain04(trade(FATHER), bank_solvency(holder=FATHER, doc_id="b1"), bank_solvency(holder=MOTHER, doc_id="b2"))
-    assert [r.outcome for r in rs] == [Outcome.PASS, Outcome.FAIL]
-    [r] = chain04(trade(FATHER))
-    assert r.outcome is Outcome.FAIL and "no Bank Solvency" in r.reason
+def test_both_parents_fit_and_the_bank_decides():
+    r = one(tin(FATHER), tin(MOTHER, doc_id="tin-2"), trade(FATHER), employment(MOTHER), bank_solvency(MOTHER))
+    assert r.outcome is Outcome.PASS and "mother" in r.reason
 
 
-def test_two_income_documents_flag():
-    [r] = chain04(trade(FATHER, doc_id="t1"), trade(FATHER, doc_id="t2"), bank_solvency(holder=FATHER))
-    assert r.outcome is Outcome.FLAG
-
-
-def test_uncertain_father_anchor_flags():
-    from builders import birth_certificate, passport
-    from hklv_rules.context import EvaluationContext
-    from hklv_rules.models import CaseFile
-    from builders import EVAL_DATE
-
-    case = CaseFile(
-        case_id="t",
-        evaluation_date=EVAL_DATE,
-        documents=(passport(), birth_certificate(confidence=LOW), tin(FATHER), trade(FATHER)),
+def test_both_parents_fit_and_the_banks_are_split_flags():
+    r = one(
+        tin(FATHER),
+        tin(MOTHER, doc_id="tin-2"),
+        trade(FATHER),
+        employment(MOTHER),
+        bank_solvency(FATHER),
+        bank_solvency(MOTHER, doc_id="s2"),
     )
-    r = by_rule(check_financial_chain(EvaluationContext.build(case)))
-    assert r["CHAIN-02"].outcome is Outcome.FLAG
+    assert r.outcome is Outcome.FLAG and "reviewer" in r.reason

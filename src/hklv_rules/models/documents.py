@@ -52,6 +52,12 @@ class OnlineCheck(Frozen):
     status: OnlineStatus
     detail: str = ""
     amount: Decimal | None = Field(default=None, description="Amount the website shows (challan)")
+    # RULES-v10, e-Apostille register: which number was looked up, and what the register holds
+    number: str | None = Field(default=None, description="Apostille number looked up")
+    number_source: Literal["qr", "printed"] | None = None
+    register_date: date | None = Field(default=None, description="Apostille date in the register")
+    register_pages: tuple[RegisterPage, ...] = Field(default=(), description="The register's own copy, read by OCR")
+    register_note: str = Field(default="", description="Why the register copy could not be read, if so")
 
 
 class DocumentBase(Frozen):
@@ -258,10 +264,30 @@ class AcademicLevel(str, Enum):
     OTHER = "OTHER"
 
 
+class RegisterPage(Frozen):
+    """One document page as the e-Apostille register holds it (RULES-v10), read by OCR."""
+
+    title: str = Field(description="The register's title, e.g. 'HSC Transcript (ForAttestation)*'")
+    level: Extracted[AcademicLevel] = Field(default_factory=Extracted[AcademicLevel])
+    student_name: Extracted[str] = Field(default_factory=_str)
+    registration_number: Extracted[str] = Field(default_factory=_str)
+
+    @property
+    def is_transcript(self) -> bool | None:
+        t = self.title.upper()
+        if "TRANSCRIPT" in t or "MARK" in t or "GRADE" in t:
+            return True
+        return False if "CERTIFICATE" in t else None
+
+
+OnlineCheck.model_rebuild()
+
+
 class EApostille(DocumentBase):
     kind: Literal["e_apostille"] = "e_apostille"
     qr_decoded: bool = False
     qr_url: str | None = None
+    printed_number: Extracted[str] = Field(default_factory=_str, description="Field 8 'No' printed on the page (RULES-v10)")
     online: OnlineCheck | None = Field(default=None, description="Result of opening the QR link")
 
 

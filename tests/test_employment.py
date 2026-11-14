@@ -2,9 +2,9 @@
 
 from datetime import date
 
-from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, by_rule, context, employment, notarised, tin, trade
+from builders import FATHER, LOW, MOTHER, STUDENT, affidavit, bank_solvency, by_rule, context, employment, notarised, tin, trade
 
-from hklv_rules.models import Language, Outcome, Person, overall
+from hklv_rules.models import Language, Outcome, Person
 from hklv_rules.rules import check_employment, check_financial_chain
 
 
@@ -13,7 +13,7 @@ def run(*docs):
 
 
 def chain(*docs):
-    return by_rule(r for r in check_financial_chain(context(*docs)) if r.rule_id != "CHAIN-04")
+    return by_rule(check_financial_chain(context(*docs)))
 
 
 def test_valid_certificate_passes_every_rule():
@@ -96,6 +96,20 @@ def test_letter_in_student_name_read_with_low_confidence_is_still_checked():
     assert run(employment(name=STUDENT, confidence=LOW))["EMP-05"].outcome is Outcome.FLAG
 
 
+def test_letter_matching_both_the_student_and_a_parent_is_checked_and_flags():
+    # RULES-v9 (D-1-16): a name shared by the student and the father can't be the student's
+    # own CV for certain, so the letter is not skipped; EMP-05 FLAGs it.
+    from builders import CaseFile, EvaluationContext, EVAL_DATE, birth_certificate, passport
+
+    case = CaseFile(
+        case_id="test",
+        evaluation_date=EVAL_DATE,
+        documents=(passport(), birth_certificate(father=STUDENT), employment(name=STUDENT)),
+    )
+    r = by_rule(check_employment(EvaluationContext.build(case)))
+    assert r["EMP-05"].outcome is Outcome.FLAG
+
+
 def test_stranger_as_employee_fails():
     assert run(employment(name="JAHANGIR ALAM"))["EMP-05"].outcome is Outcome.FAIL
 
@@ -109,38 +123,30 @@ def test_spelling_difference_bridged_by_affidavit():
     assert run(employment(name="MD. KAMAL UDDEEN"), aff)["EMP-05"].outcome is Outcome.PASS
 
 
-# Financial chain with an Employment Certificate instead of a Trade License
+# Financial chain (CHAIN-02, RULES-v9) with an Employment Certificate as the income document
 
 
 def test_chain_tin_father_and_employment_father_passes():
-    r = chain(tin(FATHER), employment(FATHER))
-    assert overall(r.values()) is Outcome.PASS
-    assert "Employment Certificate" in r["CHAIN-02"].reason
+    r = chain(tin(FATHER), employment(FATHER), bank_solvency(FATHER))
+    assert r["CHAIN-02"].outcome is Outcome.PASS
 
 
 def test_chain_tin_father_and_employment_mother_fails():
-    r = chain(tin(FATHER), employment(MOTHER))
+    r = chain(tin(FATHER), employment(MOTHER), bank_solvency(FATHER))
     assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert "TIN belongs to the Father but Employment Certificate belongs to the Mother" in r["CHAIN-02"].reason
-    assert overall(r.values()) is Outcome.FAIL
+    assert "different parents" in r["CHAIN-02"].reason
 
 
-def test_chain_with_only_a_student_letter_has_no_income_document():
-    # RULES-v8: the student's own letter is skipped, so there is no income document at all.
-    r = chain(tin(FATHER), employment(STUDENT))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert "no Trade License or Employment Certificate" in r["CHAIN-02"].reason
+def test_chain_with_only_a_student_letter_has_no_chain_result():
+    # RULES-v8: the student's own letter is skipped, so there is no income document;
+    # REQ-06 reports it, CHAIN-02 gives no result.
+    assert chain(tin(FATHER), employment(STUDENT), bank_solvency(FATHER)) == {}
 
 
-def test_chain_with_both_trade_and_employment_flags():
-    r = chain(tin(FATHER), trade(FATHER), employment(FATHER))
-    assert {v.outcome for v in r.values()} == {Outcome.FLAG}
-
-
-def test_chain_without_any_income_document_fails():
-    r = chain(tin(FATHER))
-    assert {v.outcome for v in r.values()} == {Outcome.FAIL}
-    assert "no Trade License or Employment Certificate" in r["CHAIN-02"].reason
+def test_chain_with_trade_and_employment_of_the_same_parent_passes():
+    # v8 FLAGged whenever both were submitted.
+    r = chain(tin(FATHER), trade(FATHER), employment(FATHER), bank_solvency(FATHER))
+    assert r["CHAIN-02"].outcome is Outcome.PASS
 
 
 def test_low_confidence_employment_status_flags():
@@ -148,24 +154,7 @@ def test_low_confidence_employment_status_flags():
     assert r.outcome is Outcome.FLAG
 
 
-def test_chain_tin_in_student_name_fails_even_when_employee_unreadable():
-    r = chain(tin(STUDENT), employment(FATHER, confidence=LOW))
-    assert r["CHAIN-03"].outcome is Outcome.FAIL
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-
-
-def test_chain_tin_in_student_name_fails_even_with_two_income_documents():
-    r = chain(tin(STUDENT), employment(FATHER, doc_id="e1"), employment(MOTHER, doc_id="e2"))
-    assert r["CHAIN-03"].outcome is Outcome.FAIL
-
-
-def test_chain_stranger_tin_fails_chain_02_even_when_employee_unreadable():
-    r = chain(tin("JAMAL HOSSAIN"), employment(FATHER, confidence=LOW))
-    assert r["CHAIN-02"].outcome is Outcome.FAIL
-    assert r["CHAIN-03"].outcome is Outcome.FLAG  # can't rule out the unreadable one
-
-
 def test_student_letter_beside_the_fathers_income_document_is_skipped():
     # RULES-v8: only the father's document forms the chain.
-    r = chain(tin(FATHER), trade(FATHER), employment(STUDENT, doc_id="e2"))
+    r = chain(tin(FATHER), trade(FATHER), employment(STUDENT, doc_id="e2"), bank_solvency(FATHER))
     assert {v.outcome for v in r.values()} == {Outcome.PASS}

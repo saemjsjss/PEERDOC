@@ -7,9 +7,10 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from builders import apostille, case_file, complete_case_documents, ex
+from builders import apostille, case_file, complete_case_documents, ex, register_copy
 
 from hklv_online import achallan_number, apostille_id, apply_online_checks, check_apostille, check_challan
+from hklv_online import register_copy as register_copy_online
 from hklv_online.checks import ACHALLAN_HOST, APOSTILLE_HOST, http_fetch
 from hklv_rules.engine import evaluate_case
 from hklv_rules.models import IncomeTaxChallan, OnlineStatus, Outcome
@@ -173,11 +174,72 @@ def test_apply_online_checks_feeds_acad_01():
     docs = [d.model_copy(update={"online": None}) if d.kind == "e_apostille" else d for d in docs]
     case = case_file(*docs)
     urls = {d.qr_url for d in case.documents if d.kind == "e_apostille"}
-    checked = apply_online_checks(case, FakeWeb({u: (200, FOUND) for u in urls}), pause=0)
+    checked = apply_online_checks(
+        case,
+        FakeWeb({u: (200, FOUND) for u in urls}),
+        pause=0,
+        post=lambda url: (200, REGISTER_JSON),
+        get_bytes=lambda url: (200, PNG),
+        read_register=lambda images: tuple(register_copy(title=t) for t, _ in images),
+    )
     verdict = evaluate_case(checked)
     acad_01 = [r for r in verdict.results if r.rule_id == "ACAD-01"]
-    assert acad_01 and all(r.outcome is Outcome.PASS for r in acad_01)
+    assert acad_01 and all(r.outcome is Outcome.PASS for r in acad_01), acad_01
+    assert all("student's name" in r.reason for r in acad_01)
     assert verdict.outcome is Outcome.PASS
+
+
+# --- RULES-v10: the register's own copy ----------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n fictional image"
+_FILE = "https://api.apostille.mygov.bd/api/v1/secure-external-file/eyJmaWN0aW9uYWwiOjF9.abc123"
+REGISTER_JSON = (
+    '{"status":"success","data":{"details":{"apostille_date":"2026-02-18","attachment":['
+    '{"title":"Certificate (ForAttestation)*","attachement_url":"' + _FILE + '"},'
+    '{"title":"Transcript (ForAttestation)*","attachement_url":"' + _FILE + '"}]}}}'
+)
+
+
+def test_register_copy_downloads_and_reads_each_page():
+    seen = []
+    when, pages, note = register_copy_online(
+        "100000000001",
+        post=lambda url: (seen.append(url), (200, REGISTER_JSON))[1],
+        get_bytes=lambda url: (200, PNG),
+        read_register=lambda images: tuple(register_copy(title=t) for t, _ in images),
+    )
+    assert seen == ["https://api.apostille.mygov.bd/api/v1/application-details/100000000001"]
+    assert when == date(2026, 2, 18) and note == ""
+    assert [p.title for p in pages] == ["Certificate (ForAttestation)*", "Transcript (ForAttestation)*"]
+
+
+def test_register_page_links_to_other_hosts_are_never_opened():
+    body = REGISTER_JSON.replace("api.apostille.mygov.bd", "evil.example")
+    opened = []
+    _, pages, note = register_copy_online(
+        "100000000001", lambda url: (200, body), lambda url: (opened.append(url), (200, PNG))[1], lambda i: ()
+    )
+    assert opened == [] and pages == () and "no document pages" in note
+
+
+def test_register_page_that_is_not_an_image_is_not_read():
+    _, pages, note = register_copy_online(
+        "100000000001", lambda url: (200, REGISTER_JSON), lambda url: (200, b"<html>"), lambda i: 1 / 0
+    )
+    assert pages == () and "not an image" in note
+
+
+def test_without_ocr_the_register_copy_is_not_read():
+    _, pages, note = register_copy_online("100000000001", lambda url: (200, REGISTER_JSON), lambda url: (200, PNG), None)
+    assert pages == () and "OCR is not available" in note
+
+
+def test_printed_number_is_looked_up_when_the_qr_is_unreadable():
+    web = FakeWeb({URL: (200, FOUND)})
+    a = apostille(url=None, online=None, printed=URL.rsplit("/", 1)[-1])
+    [doc] = [d for d in apply_online_checks(case_file(a), web, pause=0).documents if d.kind == "e_apostille"]
+    assert web.asked == [URL]
+    assert doc.online.status is OnlineStatus.VERIFIED and doc.online.number_source == "printed"
 
 
 def test_apostille_unknown_to_the_register_fails_acad_01():

@@ -2,8 +2,8 @@
 
 Translation and notarisation may be on different days. Each notary or translator date
 read with at least 85% confidence must be within 3 months of the evaluation date
-(inclusive). A date read with less confidence, or one after the evaluation date (a
-misread), is ignored: no result at all, not a FLAG.
+(inclusive). RULES-v9: a date read with less confidence, or one after the evaluation date
+(a misread), FLAGs (in v5-v8 it was ignored).
 """
 
 from __future__ import annotations
@@ -30,9 +30,11 @@ def check_stamp_dates(ctx: EvaluationContext) -> list[RuleResult]:
             ("translation_dates", "translator", doc.translation_dates),
         ):
             for d in dates:
-                if not d.is_reliable(STAMP_MIN_CONFIDENCE) or d.value > today:
-                    continue
-                if d.value >= cutoff:
+                if not d.is_reliable(STAMP_MIN_CONFIDENCE):
+                    outcome, why = Outcome.FLAG, f"was read with low OCR confidence (below {STAMP_MIN_CONFIDENCE:.0%})"
+                elif d.value > today:
+                    outcome, why = Outcome.FLAG, f"is after the check date {today:%d-%m-%Y} (probably a misread)"
+                elif d.value >= cutoff:
                     outcome, why = Outcome.PASS, f"is within {_VALIDITY_MONTHS} months (on or after {cutoff:%d-%m-%Y})"
                 else:
                     outcome, why = Outcome.FAIL, f"is older than {_VALIDITY_MONTHS} months (cutoff {cutoff:%d-%m-%Y})"
@@ -40,8 +42,12 @@ def check_stamp_dates(ctx: EvaluationContext) -> list[RuleResult]:
                     RuleResult(
                         rule_id=STAMP_01,
                         outcome=outcome,
-                        reason=f"{doc.doc_id}: {who} date {d.value:%d-%m-%Y} {why}",
+                        reason=f"{doc.doc_id}: {who} date {_shown(d)} {why}",
                         evidence=(ev(doc.doc_id, field, d),),
                     )
                 )
     return results
+
+
+def _shown(d) -> str:
+    return f"{d.value:%d-%m-%Y}" if d.value is not None else "(not read)"

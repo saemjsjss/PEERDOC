@@ -11,6 +11,8 @@ from .checks import (
     apply_online_checks,
     achallan_number,
     check_apostille,
+    check_apostille_number,
+    register_copy,
     check_challan,
 )
 
@@ -21,5 +23,7 @@ __all__ = [
     "apostille_id",
     "apply_online_checks",
     "check_apostille",
+    "check_apostille_number",
+    "register_copy",
     "check_challan",
 ]

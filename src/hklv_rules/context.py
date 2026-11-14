@@ -23,14 +23,18 @@ class EvaluationContext:
             threshold=threshold,
             affidavits=tuple(case.of_kind(Affidavit)),
         )
-        # RULES-v8: an employment / experience letter reliably in the student's own name is
+        # RULES-v8/v9: an employment / experience letter reliably in the student's own name is
         # the student's CV, not a sponsor's income document: skip it like an IGNORE-01 page.
+        # RULES-v9: not when the name also matches a parent; EMP-05 then FLAGs it.
         from .identity import MatchKind, compare_name
+
+        def matches(e: EmploymentCertificate, person: Person) -> bool:
+            return compare_name(e.employee_name, person, ctx).kind in (MatchKind.EXACT, MatchKind.AFFIDAVIT)
 
         own = {
             e.doc_id
             for e in case.of_kind(EmploymentCertificate)
-            if compare_name(e.employee_name, Person.STUDENT, ctx).kind in (MatchKind.EXACT, MatchKind.AFFIDAVIT)
+            if matches(e, Person.STUDENT) and not any(matches(e, p) for p in (Person.FATHER, Person.MOTHER))
         }
         if not own:
             return ctx

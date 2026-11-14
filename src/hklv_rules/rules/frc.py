@@ -38,10 +38,7 @@ _VALIDITY_MONTHS = 3
 def check_frc(ctx: EvaluationContext) -> list[RuleResult]:
     frcs = ctx.case.of_kind(FamilyRelationshipCertificate)
     if not frcs:
-        return [
-            RuleResult(rule_id=r, outcome=Outcome.FAIL, reason="No Family Relationship Certificate found")
-            for r in ALL_RULES
-        ]
+        return []  # RULES-v9: REQ-04's FAIL alone (v8 also FAILed FRC-01..05)
     results: list[RuleResult] = []
     for frc in frcs:
         results += [

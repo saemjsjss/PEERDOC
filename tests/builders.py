@@ -15,6 +15,7 @@ from datetime import date
 
 from hklv_rules.context import EvaluationContext
 from hklv_rules.models import (
+    RegisterPage,
     AcademicCertificate,
     AcademicLevel,
     AcademicTranscript,
@@ -221,18 +222,29 @@ def bank_statement(
     )
 
 
+def register_copy(name: str = STUDENT, title: str = "Document (ForAttestation)*", **fields) -> RegisterPage:
+    """The e-Apostille register's own copy of a page (RULES-v10), as OCR read it."""
+    return RegisterPage(title=title, student_name=ex(name), **fields)
+
+
 def apostille(
     doc_id: str = "apostille-1",
     page: int = 20,
     url: str | None = APOSTILLE_URL,
     online: OnlineStatus | None = OnlineStatus.VERIFIED,
+    register: tuple[RegisterPage, ...] | None = None,
+    printed: str | None = None,
 ) -> EApostille:
+    """Default: found in the register, whose copy is in the student's name."""
+    if register is None:
+        register = (register_copy(),) if online is OnlineStatus.VERIFIED else ()
     return EApostille(
         doc_id=doc_id,
         pages=(page,),
         qr_decoded=url is not None,
         qr_url=url,
-        online=OnlineCheck(status=online) if online is not None else None,
+        printed_number=ex(printed) if printed else Extracted[str](),
+        online=OnlineCheck(status=online, register_pages=register) if online is not None else None,
     )
 
 

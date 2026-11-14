@@ -9,7 +9,6 @@ from builders import (
     affidavit,
     by_rule,
     context,
-    employment,
     ex,
     notarised,
     tin,
@@ -102,91 +101,54 @@ def test_qr_tin_is_trusted_at_full_confidence():
     assert qr_ev.value == TIN_NUMBER
 
 
-# --- TIN-03 name match ---------------------------------------------------------------
+# --- TIN-03 taxpayer (RULES-v9: assigned by name to the father or mother) -------------
 
 
-def test_taxpayer_matches_trade_owner_with_normalisation():
-    assert run(tin("MOHAMMAD KAMAL UDDIN"), trade("Md Kamal Uddin"))["TIN-03"].outcome is Outcome.PASS
+def test_taxpayer_father_passes():
+    r = run(tin(FATHER))["TIN-03"]
+    assert r.outcome is Outcome.PASS and "Father" in r.reason
 
 
-def test_taxpayer_differs_from_trade_owner_fails():
-    r = run(tin(FATHER), trade(MOTHER))["TIN-03"]
-    assert r.outcome is Outcome.FAIL
-    assert MOTHER in r.reason and "trade" in r.reason
-    assert {(e.doc_id, e.field) for e in r.evidence} == {("tin", "taxpayer_name"), ("trade", "owner_name")}
+def test_taxpayer_mother_passes():
+    assert run(tin(MOTHER))["TIN-03"].outcome is Outcome.PASS
 
 
-def test_student_in_both_still_passes_name_match():
-    # TIN-03 only checks the two names agree; the student-name ban is CHAIN-03 / TRADE-04.
-    assert run(tin(STUDENT), trade(STUDENT))["TIN-03"].outcome is Outcome.PASS
+def test_taxpayer_with_normalised_title_passes():
+    assert run(tin("MOHAMMAD KAMAL UDDIN"))["TIN-03"].outcome is Outcome.PASS
+
+
+def test_taxpayer_student_fails():  # v8: CHAIN-03
+    r = run(tin(STUDENT))["TIN-03"]
+    assert r.outcome is Outcome.FAIL and "student" in r.reason
+
+
+def test_taxpayer_stranger_fails():
+    assert run(tin("JAHANGIR ALAM"))["TIN-03"].outcome is Outcome.FAIL
 
 
 def test_spelling_difference_covered_by_affidavit_passes():
     aff = affidavit((Person.FATHER, FATHER, "KAMAL UDDIN"))
-    r = run(tin(FATHER), trade("KAMAL UDDIN"), aff)["TIN-03"]
+    r = run(tin("KAMAL UDDIN"), aff)["TIN-03"]
     assert r.outcome is Outcome.PASS
     assert "affidavit" in r.reason
 
 
 def test_spelling_difference_with_unnotarised_affidavit_fails():
     aff = affidavit((Person.FATHER, FATHER, "KAMAL UDDIN"), notary=notarised(stamp=False))
-    assert run(tin(FATHER), trade("KAMAL UDDIN"), aff)["TIN-03"].outcome is Outcome.FAIL
-
-
-def test_spelling_difference_with_unreadable_affidavit_notary_flags():
-    aff = affidavit((Person.FATHER, FATHER, "KAMAL UDDIN"), notary=notarised(confidence=LOW))
-    assert run(tin(FATHER), trade("KAMAL UDDIN"), aff)["TIN-03"].outcome is Outcome.FLAG
+    assert run(tin("KAMAL UDDIN"), aff)["TIN-03"].outcome is Outcome.FAIL
 
 
 def test_taxpayer_low_confidence_flags():
-    r = run(tin(FATHER, confidence=LOW), trade(FATHER))["TIN-03"]
+    r = run(tin(FATHER, confidence=LOW))["TIN-03"]
     assert r.outcome is Outcome.FLAG
     assert "low OCR confidence" in r.reason
 
 
 def test_taxpayer_missing_flags():
     t = tin(FATHER).model_copy(update={"taxpayer_name": Extracted[str]()})
-    assert run(t, trade(FATHER))["TIN-03"].outcome is Outcome.FLAG
+    assert run(t)["TIN-03"].outcome is Outcome.FLAG
 
 
-def test_trade_owner_low_confidence_flags():
-    assert run(tin(FATHER), trade(FATHER, confidence=LOW))["TIN-03"].outcome is Outcome.FLAG
-
-
-def test_no_trade_licence_no_employment_flags():
-    r = run(tin(FATHER))["TIN-03"]
-    assert r.outcome is Outcome.FLAG
-    assert "No Trade License to compare with" in r.reason
-
-
-def test_no_trade_licence_compares_with_employment_certificate():
-    r = run(tin(FATHER), employment(FATHER))["TIN-03"]
-    assert r.outcome is Outcome.PASS
-    assert "Employment Certificate" in r.reason
-
-
-def test_employment_certificate_mismatch_fails():
-    r = run(tin(FATHER), employment(MOTHER))["TIN-03"]
-    assert r.outcome is Outcome.FAIL
-    assert "Employment Certificate instead" in r.reason
-
-
-def test_trade_licence_takes_precedence_over_employment():
-    r = run(tin(FATHER), trade(FATHER), employment(MOTHER))["TIN-03"]
-    assert r.outcome is Outcome.PASS
-    assert "Employment" not in r.reason
-
-
-def test_several_trade_licences_all_matching_pass():
-    r = run(tin(FATHER), trade(FATHER, doc_id="t1"), trade("MD KAMAL UDDIN", doc_id="t2"))["TIN-03"]
-    assert r.outcome is Outcome.PASS
-
-
-def test_several_trade_licences_none_matching_fail():
-    r = run(tin(FATHER), trade(MOTHER, doc_id="t1"), trade("JAMAL HOSSAIN", doc_id="t2"))["TIN-03"]
-    assert r.outcome is Outcome.FAIL
-
-
-def test_several_trade_licences_one_matching_one_not_flags():
-    r = run(tin(FATHER), trade(FATHER, doc_id="t1"), trade(MOTHER, doc_id="t2"))["TIN-03"]
-    assert r.outcome is Outcome.FLAG
+def test_taxpayer_no_longer_compared_with_the_income_document():
+    # Same parent is CHAIN-02's job (RULES-v9): TIN-03 doesn't look at the trade licence.
+    assert run(tin(FATHER), trade(MOTHER))["TIN-03"].outcome is Outcome.PASS

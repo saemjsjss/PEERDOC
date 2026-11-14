@@ -32,16 +32,20 @@ def test_exactly_three_months_passes_one_day_more_fails():
     assert "older than 3 months" in r.reason
 
 
-def test_below_85_percent_is_ignored_entirely():
-    assert run(notary=(d(date(2020, 1, 1), conf=0.84),), translator=(d(date(2020, 1, 1), conf=0.5),)) == []
+def test_below_85_percent_flags():  # RULES-v9: was ignored in v5-v8
+    r = run(notary=(d(date(2020, 1, 1), conf=0.84),), translator=(d(date(2020, 1, 1), conf=0.5),))
+    assert [x.outcome for x in r] == [Outcome.FLAG, Outcome.FLAG]
+    assert "low OCR confidence" in r[0].reason
 
 
 def test_85_percent_counts():
     assert run(notary=(d(date(2020, 1, 1), conf=0.85),))[0].outcome is Outcome.FAIL
 
 
-def test_future_date_is_ignored():
-    assert run(notary=(d(date(2026, 7, 9)),)) == []
+def test_future_date_flags():  # RULES-v9: was ignored in v5-v8
+    r = run(notary=(d(date(2026, 7, 9)),))
+    assert [x.outcome for x in r] == [Outcome.FLAG]
+    assert "after the check date" in r[0].reason
 
 
 def test_no_dates_no_results():

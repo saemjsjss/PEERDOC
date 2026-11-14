@@ -1479,9 +1479,40 @@ def academic_transcript(group: PageGroup, doc_id: str) -> m.AcademicTranscript:
     )
 
 
+# Apostille field 8, "8. Nº 276724219744" (also read "8.N°", "8.No", "8. No ..."): one line.
+_APOSTILLE_NO = re.compile(r"^\s*(?:8\s*[.,]?\s*)?N\s*[º°oO]\s*\.?\s*[:.]?\s*(\d[\d ]{6,18}\d)\s*$")
+
+
+def _apostille_printed_number(group: PageGroup) -> Extracted[str]:
+    """RULES-v10: the apostille number printed in field 8, digits only, with the line's score."""
+    for page in group.pages:
+        for ln in page.lines:
+            if mt := _APOSTILLE_NO.match(ln.text):
+                return Extracted[str](value=re.sub(r"\D", "", mt.group(1)), confidence=ln.score, source_page=page.page_no)
+    return Extracted[str]()
+
+
 def e_apostille(group: PageGroup, doc_id: str) -> m.EApostille:
     qr = next((b for p in group.pages for b in p.barcodes if b.format.upper().startswith("QR")), None)
-    return m.EApostille(doc_id=doc_id, pages=group.page_nos, qr_decoded=qr is not None, qr_url=qr.text if qr is not None else None)
+    return m.EApostille(
+        doc_id=doc_id,
+        pages=group.page_nos,
+        qr_decoded=qr is not None,
+        qr_url=qr.text if qr is not None else None,
+        printed_number=_apostille_printed_number(group),
+    )
+
+
+def register_page(page: PageReading, title: str) -> m.RegisterPage:
+    """RULES-v10: the e-Apostille register's own copy of one academic page, read like a
+    submitted certificate or transcript (same name, level and registration finders)."""
+    group = PageGroup(kind=PageKind.ACADEMIC_CERTIFICATE, pages=[page])
+    return m.RegisterPage(
+        title=title,
+        level=_level(group),
+        student_name=_student_name(group),
+        registration_number=_board_registration(group),
+    )
 
 
 def photo(group: PageGroup, doc_id: str) -> m.Photo:

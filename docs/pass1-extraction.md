@@ -89,7 +89,7 @@ The same words recur across document types, so the order of checks is part of th
 5. **Death** before birth, but only on "Death Registration Number" / "Death Certificate" /
    "Date of Death": every BDRIS birth certificate is issued by the "Registrar of Birth and
    Death".
-6. Birth, FRC, tax challan / acknowledgement / certificate, **TIN before "Return of Income"**
+6. **FRC before birth** (an FRC table lists the members' birth registration numbers), then birth, tax challan / acknowledgement / certificate, **TIN before "Return of Income"**
    (a TIN certificate tells the taxpayer to file one). Birth: "Birth Registration
    Number/No", BDRIS or the Bangla title. Older City Corporation certificates (BDR Form-3)
    are recognised **after the FRC check** by the birth registrar office ("Office of the
@@ -110,10 +110,11 @@ The same words recur across document types, so the order of checks is part of th
    unchanged from before: every birth certificate in a case is checked against the
    student's passport, so a parent's own certificate in the upload FAILs BIRTH-03 (as a
    parent's BDRIS certificate always did).
-7. NID without MRZ ("National ID Card", "NID No"), last of the identity checks: FRCs, trade
+7. NID without MRZ ("National ID Card"), last of the identity checks: FRCs, trade
    licences and TINs all print NID numbers.
 8. Bank statement, solvency ("To Whom It May Concern" only together with bank + account
-   words), employment, academic, IELTS/TOPIK.
+   words), employment, then a page that only quotes an "NID No" (an NID only now: bank and
+   employer letters quote one), academic, IELTS/TOPIK.
 
 Academic certificates and transcripts count only inside an apostille block (section 1.1); a
 university's recommendation letter is ignored.
@@ -259,10 +260,28 @@ Still open: text detection itself peaks at the card's limit. Capping its input s
 (`text_det_limit_type="max"`) would remove that spike, but it changes what is detected and
 needs its own accuracy check, especially on MRZ lines.
 
-## 5. Known gaps
+## 5. OCR misreads the rules allow for
+
+Moved here from the rulebook (RULES-v9), which keeps only the policy each one serves.
+
+* Translation agency letterhead: the agency's own "Trade Licence No." on every translated
+  page, even with an OCR slip in the number (e.g. "D60631"), does not make the page a
+  trade licence (Section 1.1).
+* Notary seal ring text: "NOTARY PULIC" counts as a word starting "NOTAR"; "REG NO TAREK"
+  does not (Section 0, Notarised).
+* The notary's red foil seal is found by colour (`hklv_ocr/red_seal.py`), not by text.
+* MRZ names: digits are read as their look-alike letters (0->O, 1->I, 2->Z, 5->S, 6->G,
+  8->B), since names hold no digits (2.1, PASSPORT-01).
+* Old BDR Form-3 birth certificates: the filled square between month and year
+  (`25 | 02 | ■ | 2002`) is skipped when the date is read (BIRTH-03).
+* FRC tables: when the layout reader returns only part of the table, the dropped FATHER /
+  MOTHER cells are unreadable rows, so FRC-03 FLAGs instead of FAILing.
+* Challans: the amount is read from "Total Amount", never from the line under "Amount in
+  words" (TAX-04).
+
+## 6. Known gaps
 
 * Bangla text: neither reader reads it reliably. English translations are the source of
   truth; Bangla only decides the document's language.
-* IELTS/TOPIK pages are classified but not extracted (no LANG rules yet).
 * Cross-document agreement (the same name on many documents) is not used to raise or lower
   confidence yet.

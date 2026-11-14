@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import date
@@ -78,12 +79,17 @@ def evaluate_reading(
     seconds: dict[str, float] | None = None,
     online: bool = False,
     fetch=None,
+    post=None,
+    get_bytes=None,
+    read_register=None,
 ) -> PipelineResult:
     """Pass 1 extraction (+ online checks) + Pass 2/3 rules on an existing reading (no GPU).
 
     `online=True` checks e-Apostilles and automated challans on the official sites
     (blocking HTTP; `fetch` replaces the HTTP call in tests). Without it, ACAD-01 / TAX-04
-    report "not verified online" (FLAG).
+    report "not verified online" (FLAG). RULES-v10: a found apostille's register copy is
+    downloaded (`post`, `get_bytes`; the real ones unless `fetch` is replaced) and read by
+    `read_register` (an OCR step; without one, ACAD-01 can't confirm the owner -> FLAG).
     """
     timings = dict(seconds or {})
     t = time.perf_counter()
@@ -91,10 +97,14 @@ def evaluate_reading(
     timings["extraction"] = time.perf_counter() - t
     if online:
         from hklv_online import apply_online_checks
-        from hklv_online.checks import http_fetch
+        from hklv_online.checks import http_fetch, http_get_bytes, http_post_json
 
+        if fetch is None:
+            post, get_bytes = post or http_post_json, get_bytes or http_get_bytes
         t = time.perf_counter()
-        case = apply_online_checks(case, fetch or http_fetch)
+        case = apply_online_checks(
+            case, fetch or http_fetch, post=post, get_bytes=get_bytes, read_register=read_register
+        )
         timings["online"] = time.perf_counter() - t
     t = time.perf_counter()
     verdict = evaluate_case(case, threshold)
@@ -138,6 +148,7 @@ async def run_case(
     if on_reading is not None:
         on_reading(reading)
     # Online checks block on HTTP: keep them off the event loop.
+    read_register = register_reader(reader, asyncio.get_running_loop()) if online else None
     return await asyncio.to_thread(
         evaluate_reading,
         reading,
@@ -147,7 +158,29 @@ async def run_case(
         seconds=timings,
         online=online,
         fetch=fetch,
+        read_register=read_register,
     )
+
+
+def register_reader(reader, loop: asyncio.AbstractEventLoop):
+    """RULES-v10: OCR the e-Apostille register's page images with the case's reader.
+
+    Called from the online-check worker thread; the reader's coroutine runs on `loop`."""
+    from hklv_extract.extractors import register_page
+
+    def read(images: list[tuple[str, bytes]]):
+        out = []
+        with tempfile.TemporaryDirectory(prefix="hklv-register-") as tmp:
+            for i, (title, img) in enumerate(images):
+                suffix = ".png" if img[1:4] == b"PNG" else ".jpg"  # PNG files start with 0x89 "PNG"
+                path = Path(tmp) / f"register_{i}{suffix}"
+                path.write_bytes(img)
+                pages = asyncio.run_coroutine_threadsafe(reader.read_file(path), loop).result(timeout=600)
+                if pages:
+                    out.append(register_page(pages[0], title))
+        return tuple(out)
+
+    return read
 
 
 # --- report ------------------------------------------------------------------------------

@@ -27,7 +27,8 @@ MANUAL_EDGES = [
     (APOSTILLE, "ACAD-01"), (CHALLAN, "TAX-04"),
     ("NID-ASSIGN", "REQ-08"), ("NID-ASSIGN", "REQ-09"),
     ("TIN-03", "CHAIN-02"), ("TRADE-04", "CHAIN-02"), ("EMP-05", "CHAIN-02"),
-    ("TRADE-04", "CHAIN-04"), ("EMP-05", "CHAIN-04"), ("BANK-01", "CHAIN-04"),  # RULES-v6
+    ("TRADE-04", "CHAIN-04"), ("EMP-05", "CHAIN-04"), ("BANK-01", "CHAIN-04"),  # RULES-v6..v8
+    ("BANK-01", "CHAIN-02"),  # RULES-v9: the bank link merged into CHAIN-02
 ]
 
 

@@ -17,9 +17,11 @@ from builders import (
     apostille,
     birth_certificate,
     by_rule,
+    ex,
     context,
     notarised,
     passport,
+    register_copy,
     trade,
     FATHER,
 )
@@ -509,3 +511,62 @@ def test_every_academic_document_must_be_notarised(notary, expected):
     assert len(res) == 4
     assert {r.outcome for r in res if r.reason.startswith("Transcript")} == {expected}
     assert {r.outcome for r in res if r.reason.startswith("Certificate")} == {Outcome.PASS}
+
+
+# --- ACAD-01 owner check against the register's copy (RULES-v10) ---------------------
+
+
+def owner(*register, follows=None, **kw):
+    """ACAD-01 for an apostille on page 20 followed by `follows` (an SSC certificate)."""
+    doc = follows or academic_certificate(page=21)
+    return one("ACAD-01", results(apostille(register=register, **kw), doc, academic_transcript(page=23)))
+
+
+def test_register_copy_in_the_students_name_passes():
+    r = owner(register_copy(title="SSC Certificate (ForAttestation)*"))
+    assert r.outcome is Outcome.PASS and "student's name" in r.reason
+
+
+def test_register_copy_in_another_name_fails():
+    r = owner(register_copy("JAHANGIR ALAM", title="SSC Certificate"))
+    assert r.outcome is Outcome.FAIL and "JAHANGIR ALAM" in r.reason
+
+
+def test_register_copy_name_read_with_low_confidence_flags():
+    page = register_copy(title="SSC Certificate").model_copy(update={"student_name": ex(STUDENT, LOW)})
+    assert owner(page).outcome is Outcome.FLAG
+
+
+def test_found_but_register_copy_not_read_flags():
+    r = owner()  # empty register copy
+    assert r.outcome is Outcome.FLAG and "owner was not checked" in r.reason
+
+
+def test_only_the_register_page_of_the_same_kind_is_compared():
+    cert = register_copy(title="SSC Certificate (ForAttestation)*")
+    other = register_copy("JAHANGIR ALAM", title="SSC Transcript (ForAttestation)*")
+    assert owner(cert, other).outcome is Outcome.PASS
+
+
+def test_register_holding_another_level_fails():
+    hsc = register_copy(title="HSC Certificate", level=ex(AcademicLevel.HSC))
+    r = owner(hsc)  # the SSC certificate follows
+    assert r.outcome is Outcome.FAIL and "do not include" in r.reason
+
+
+def test_registration_number_differing_from_the_register_copy_fails():
+    page = register_copy(title="SSC Certificate", registration_number=ex("1910534278"))
+    cert = academic_certificate(page=21).model_copy(update={"registration_number": ex("1910599999")})
+    r = owner(page, follows=cert)
+    assert r.outcome is Outcome.FAIL and "registration no." in r.reason
+
+
+def test_qr_and_printed_number_disagreeing_flags():
+    r = owner(register_copy(), printed="999999999999")
+    assert r.outcome is Outcome.FLAG and "differs from the printed No." in r.reason
+
+
+def test_printed_number_unknown_to_the_register_flags_not_fails():
+    r = owner(url=None, online=OnlineStatus.NOT_FOUND, printed="100000000001")
+    # a misread printed number looks like a fake one, so a person checks it
+    assert r.outcome is Outcome.FLAG
