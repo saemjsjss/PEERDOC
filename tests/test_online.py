@@ -429,3 +429,41 @@ def test_challan_amount_with_thousands_separator_is_read():
     page = challan_page({"ChallanNo": CHALLAN_NO, "Amount": "3,000.00", "IsRefundRequested": False, "ErrMessage": None})
     check = check_challan(CHALLAN_NO, FakeWeb({CHALLAN_URL: (200, page)}))
     assert check.status is OnlineStatus.VERIFIED and check.amount == Decimal("3000")
+
+
+def test_register_copy_beyond_the_page_cap_is_marked_incomplete(monkeypatch):
+    monkeypatch.setattr("hklv_online.checks.MAX_REGISTER_PAGES", 1)
+    _, pages, note = register_copy_online(
+        "100000000001", lambda url: (200, REGISTER_JSON), lambda url: (200, PNG),
+        lambda images: tuple(register_copy(title=t) for t, _ in images),
+    )
+    assert len(pages) == 1 and note == "only the first 1 of 2 register pages were read"
+
+
+def test_register_page_ocr_could_not_read_is_marked_incomplete():
+    _, pages, note = register_copy_online(
+        "100000000001", lambda url: (200, REGISTER_JSON), lambda url: (200, PNG),
+        lambda images: (register_copy(title=images[0][0]),),
+    )
+    assert len(pages) == 1 and note == "1 of 2 register pages could not be read"
+
+
+def test_register_outage_after_verified_keeps_verified_and_flags_acad_01():
+    def down(url):
+        raise OSError("down")
+
+    a = apostille(online=None)
+    checked = apply_online_checks(
+        case_file(a), FakeWeb({URL: (200, FOUND)}), pause=0, post=down, get_bytes=lambda url: (200, PNG),
+        read_register=lambda images: (),
+    )
+    [doc] = [d for d in checked.documents if d.kind == "e_apostille"]
+    assert doc.online.status is OnlineStatus.VERIFIED and "could not be reached" in doc.online.register_note
+    [r] = [r for r in evaluate_case(checked).results if r.rule_id == "ACAD-01"]
+    assert r.outcome is Outcome.FLAG and "owner was not checked" in r.reason
+
+
+def test_register_attachment_that_is_not_a_list_is_no_pages():
+    body = REGISTER_JSON.replace('"attachment":[', '"attachment":7,"x":[')
+    _, pages, note = register_copy_online("100000000001", lambda url: (200, body), lambda url: (200, PNG), lambda i: ())
+    assert pages == () and "no document pages" in note

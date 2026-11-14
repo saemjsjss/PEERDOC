@@ -269,7 +269,8 @@ def register_copy(
     except ValueError:
         when = None
     files: list[tuple[str, str]] = []
-    for a in details.get("attachment") or []:
+    attachments = details.get("attachment")
+    for a in attachments if isinstance(attachments, list) else []:
         url = a.get("attachement_url") if isinstance(a, dict) else None  # the API's spelling
         if not isinstance(url, str):
             continue
@@ -293,6 +294,11 @@ def register_copy(
         pages = tuple(read_register(images))
     except Exception as e:  # noqa: BLE001
         return when, (), f"register pages could not be read ({type(e).__name__})"
+    # A non-empty note marks the copy incomplete, so ACAD-01 won't FAIL on a page it never saw.
+    if len(files) > len(images):
+        return when, pages, f"only the first {len(images)} of {len(files)} register pages were read"
+    if len(pages) < len(images):
+        return when, pages, f"{len(images) - len(pages)} of {len(images)} register pages could not be read"
     return when, pages, ""
 
 

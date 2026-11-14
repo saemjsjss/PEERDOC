@@ -570,3 +570,30 @@ def test_printed_number_unknown_to_the_register_flags_not_fails():
     r = owner(url=None, online=OnlineStatus.NOT_FOUND, printed="100000000001")
     # a misread printed number looks like a fake one, so a person checks it
     assert r.outcome is Outcome.FLAG
+
+
+def test_register_missing_the_level_flags_when_its_copy_is_incomplete():
+    # The SSC page may be among those not downloaded or not read: no FAIL on a page never seen.
+    hsc = register_copy(title="HSC Certificate", level=ex(AcademicLevel.HSC))
+    a = apostille(register=(hsc,))
+    a = a.model_copy(update={"online": a.online.model_copy(update={"register_note": "1 of 2 register pages could not be read"})})
+    r = one("ACAD-01", results(a, academic_certificate(page=21), academic_transcript(page=23)))
+    assert r.outcome is Outcome.FLAG and "do not include" in r.reason
+
+
+# --- RULES-v11: a FAIL from the register beats a QR/printed number disagreement ----------
+
+
+def test_numbers_disagreeing_and_qr_number_unknown_to_the_register_fails():
+    r = owner(printed="999999999999", online=OnlineStatus.NOT_FOUND)
+    assert r.outcome is Outcome.FAIL and "no such apostille" in r.reason and "differs from the printed No." in r.reason
+
+
+def test_numbers_disagreeing_and_register_copy_in_another_name_fails():
+    r = owner(register_copy("JAHANGIR ALAM", title="SSC Certificate"), printed="999999999999")
+    assert r.outcome is Outcome.FAIL and "JAHANGIR ALAM" in r.reason and "differs from the printed No." in r.reason
+
+
+def test_numbers_disagreeing_and_online_checks_off_still_flags():
+    r = owner(printed="999999999999", online=OnlineStatus.NOT_RUN)
+    assert r.outcome is Outcome.FLAG and "differs from the printed No." in r.reason

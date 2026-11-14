@@ -148,8 +148,8 @@ def _qr_number(url: str) -> str | None:
 
 
 def _acad_01(apostille: EApostille, ctx: EvaluationContext) -> RuleResult:
-    """RULES-v10: the apostille is in the official register AND the register's own copy of
-    the document is the student's. Number from the QR, else the printed No. (field 8)."""
+    """RULES-v10/v11: the apostille is in the official register AND the register's own copy
+    of the document is the student's. Number from the QR, else the printed No. (field 8)."""
     page = _first_page(apostille)
     label = _label(apostille)
     printed = apostille.printed_number
@@ -163,7 +163,12 @@ def _acad_01(apostille: EApostille, ctx: EvaluationContext) -> RuleResult:
             Evidence(doc_id=apostille.doc_id, field="online.status", value=online.status.value, page=page)
         )
 
+    mismatch = ""
+
     def result(outcome: Outcome, reason: str) -> RuleResult:
+        if mismatch:  # RULES-v11: a FAIL stands; anything better becomes FLAG
+            outcome = outcome if outcome is Outcome.FAIL else Outcome.FLAG
+            reason = f"{reason}; {mismatch}"
         return RuleResult(rule_id=ACAD_01, outcome=outcome, reason=f"{label}: {reason}", evidence=tuple(evidence))
 
     url = (apostille.qr_url or "").strip()
@@ -172,7 +177,7 @@ def _acad_01(apostille: EApostille, ctx: EvaluationContext) -> RuleResult:
         return result(Outcome.FAIL, f"QR does not point to the official e-Apostille site: {url}")
     qr_no = _qr_number(url) if qr_ok else None
     if qr_no and printed.is_reliable(ctx.threshold) and printed.value != qr_no:
-        return result(Outcome.FLAG, f"QR number {qr_no} differs from the printed No. {printed.value}")
+        mismatch = f"QR number {qr_no} differs from the printed No. {printed.value}"
     if not qr_ok and not printed.found:
         return result(Outcome.FLAG, "QR could not be decoded and no printed No. was read")
 
@@ -207,7 +212,11 @@ def _acad_01_owner(apostille: EApostille, online, where: str, ctx: EvaluationCon
         if not matching:
             listed = "; ".join(p.title for p in pages)
             what = f"{level.value if level else ''} {'transcript' if transcript else 'certificate'}".strip()
-            sure = level is not None and all(p.level.is_reliable(ctx.threshold) for p in same_kind)
+            sure = (
+                level is not None
+                and not online.register_note  # an incomplete copy may hold the missing page
+                and all(p.level.is_reliable(ctx.threshold) for p in same_kind)
+            )
             return result(
                 Outcome.FAIL if sure and same_kind else Outcome.FLAG,
                 f"{where}: the register's documents ({listed}) do not include the {what} {doc.doc_id} that follows it",

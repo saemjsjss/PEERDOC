@@ -6,6 +6,7 @@ Each model holds only the fields Rulebook v2.5 needs. Pass 1 groups related page
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 from enum import Enum
@@ -275,7 +276,7 @@ class RegisterPage(Frozen):
     @property
     def is_transcript(self) -> bool | None:
         t = self.title.upper()
-        if "TRANSCRIPT" in t or "MARK" in t or "GRADE" in t:
+        if re.search(r"\b(TRANSCRIPT|MARKS?|GRADES?)\b", t):
             return True
         return False if "CERTIFICATE" in t else None
 

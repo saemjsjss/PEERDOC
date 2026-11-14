@@ -59,7 +59,7 @@ def _base_dir() -> Path:
 def _work_dir() -> str:
     """This instance's own folder for case uploads. Two servers can't share a port, so a
     per-port folder keeps one instance's startup sweep away from another's live cases."""
-    folder = _base_dir() / f"hklv-port-{os.environ.get('HKLV_PORT', '8000')}"
+    folder = _base_dir() / f"hklv-port-{os.environ.get('HKLV_PORT', '8010')}"
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     return str(folder)
 

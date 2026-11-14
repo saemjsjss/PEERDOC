@@ -6,7 +6,7 @@ need the GPU there.
 
 ## Start
 
-The server also serves the web UI at <http://127.0.0.1:8000/> once it has been built
+The server also serves the web UI at <http://127.0.0.1:8010/> once it has been built
 (`npm --prefix frontend run build`; see `frontend/README.md`).
 
 From Windows (cmd or PowerShell):
@@ -22,7 +22,7 @@ bash /mnt/c/dcSS/scripts/wsl/serve.sh
 ```
 
 The OCR models load once at startup (about 20 s). Interactive docs are at
-<http://127.0.0.1:8000/docs>. The server listens on **127.0.0.1 only**: it is reachable from
+<http://127.0.0.1:8010/docs>. The server listens on **127.0.0.1 only**: it is reachable from
 this Windows machine (WSL forwards localhost) but not from the network. `HKLV_PORT` changes
 the port. One worker: the GPU is a single shared resource, and pages from concurrent
 requests take turns on it.
@@ -36,7 +36,7 @@ The web UI sends the header on every request. Requests must also address the ser
 `127.0.0.1` or `localhost`; any other `Host` gets `400` (protection against DNS rebinding).
 
 ```
-curl -H "X-HKLV: 1" -F "files=@student.zip" http://127.0.0.1:8000/jobs
+curl -H "X-HKLV: 1" -F "files=@student.zip" http://127.0.0.1:8010/jobs
 ```
 
 ## Jobs: `POST /jobs`, `GET /jobs/{id}`, `DELETE /jobs/{id}` (what the web UI uses)
@@ -88,8 +88,8 @@ against the 20-case limit and in everyone's ETA) and the response is sent when i
 Example:
 
 ```
-curl -H "X-HKLV: 1" -F "files=@student.zip" -F case_id=2026-0417 -F evaluation_date=2026-11-11 http://127.0.0.1:8000/verify
-curl -H "X-HKLV: 1" -F "files=@passport.pdf" -F "files=@photo.jpg" -F "files=@nid.pdf" http://127.0.0.1:8000/verify
+curl -H "X-HKLV: 1" -F "files=@student.zip" -F case_id=2026-0417 -F evaluation_date=2026-11-11 http://127.0.0.1:8010/verify
+curl -H "X-HKLV: 1" -F "files=@passport.pdf" -F "files=@photo.jpg" -F "files=@nid.pdf" http://127.0.0.1:8010/verify
 ```
 
 Response (200):

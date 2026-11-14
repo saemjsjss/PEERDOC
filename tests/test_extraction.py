@@ -1528,3 +1528,24 @@ def test_old_style_original_joins_its_own_translation():
     groups = groups_for(original, translation)
     assert [g.page_nos for g in groups] == [(1, 2)]
 
+
+
+@pytest.mark.parametrize(
+    ("text", "number"),
+    [("8. Nº 248598123529", "248598123529"), ("8.N° 2767 2421 9744", "276724219744"), ("No: 12345678", "12345678")],
+)
+def test_apostille_printed_number_is_read_from_field_8(text, number):
+    from hklv_extract.extractors import e_apostille
+    from hklv_extract.group import PageGroup
+
+    page = make_page([]).model_copy(update={"lines": (_line("APOSTILLE", 100, 100, 600), _line(text, 100, 200, 900))})
+    got = e_apostille(PageGroup(kind=PageKind.E_APOSTILLE, pages=[page]), "e_apostille-1").printed_number
+    assert got.value == number and got.confidence == 0.99
+
+
+def test_apostille_without_field_8_has_no_printed_number():
+    from hklv_extract.extractors import e_apostille
+    from hklv_extract.group import PageGroup
+
+    page = make_page([]).model_copy(update={"lines": (_line("APOSTILLE", 100, 100, 600), _line("Date 12-11-2026", 100, 200, 900))})
+    assert not e_apostille(PageGroup(kind=PageKind.E_APOSTILLE, pages=[page]), "e_apostille-1").printed_number.found

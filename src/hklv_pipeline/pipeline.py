@@ -162,6 +162,9 @@ async def run_case(
     )
 
 
+REGISTER_OCR_SECONDS = 300  # all register pages of one apostille
+
+
 def register_reader(reader, loop: asyncio.AbstractEventLoop):
     """RULES-v10: OCR the e-Apostille register's page images with the case's reader.
 
@@ -169,13 +172,25 @@ def register_reader(reader, loop: asyncio.AbstractEventLoop):
     from hklv_extract.extractors import register_page
 
     def read(images: list[tuple[str, bytes]]):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # a worker thread, as it should be
+        else:
+            raise RuntimeError("register_reader must not run on the event loop thread")
         out = []
+        deadline = time.monotonic() + REGISTER_OCR_SECONDS
         with tempfile.TemporaryDirectory(prefix="hklv-register-") as tmp:
             for i, (title, img) in enumerate(images):
                 suffix = ".png" if img[1:4] == b"PNG" else ".jpg"  # PNG files start with 0x89 "PNG"
                 path = Path(tmp) / f"register_{i}{suffix}"
                 path.write_bytes(img)
-                pages = asyncio.run_coroutine_threadsafe(reader.read_file(path), loop).result(timeout=600)
+                fut = asyncio.run_coroutine_threadsafe(reader.read_file(path), loop)
+                try:
+                    pages = fut.result(timeout=max(deadline - time.monotonic(), 0))
+                except TimeoutError:
+                    fut.cancel()  # don't leave OCR holding the reader on a deleted file
+                    raise
                 if pages:
                     out.append(register_page(pages[0], title))
         return tuple(out)
