@@ -85,7 +85,8 @@ The same words recur across document types, so the order of checks is part of th
    translation has it.
 3. NID with an ID-card MRZ.
 4. **Trade License** (also its verification QR, ".../verify/trade..."): it has the owner's
-   birth-registration field.
+   birth-registration field. The English title counts only on a line of at most 8 words
+   (RULES-v13): a personal statement that mentions "a valid trade license" is not one.
 5. **Death** before birth, but only on "Death Registration Number" / "Death Certificate" /
    "Date of Death": every BDRIS birth certificate is issued by the "Registrar of Birth and
    Death".

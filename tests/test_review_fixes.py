@@ -614,3 +614,28 @@ def test_words_starting_with_a_month_are_not_months():
 def test_challan_amount_skips_a_one_digit_serial():
     page = make_page(["Challan No: 2526-0012345678", "Amount", "1", "Total Amount: 10,000"])  # table header, serial
     assert tax_challan(_group(PageKind.TAX_CHALLAN, page), "c").printed_amount.value == Decimal("10000")
+
+
+# --- RULES-v13: "trade license" inside a sentence is not a trade licence ---------------------
+
+
+def test_statement_mentioning_a_trade_license_is_not_a_trade_licence():
+    page = make_page([
+        "STATEMENT OF PURPOSE",
+        "Dear Admission Committee,",
+        "greatly enhanced my communication, leadership, and analytical presentation skills. Moreover,",
+        "since 2021, I have successfully operated my own rod, cement, and construction materials",
+        "business under a valid trade license. Managing a commercial enterprise has provided me with",
+    ])
+    assert classify_page(page, TODAY).kind is not PageKind.TRADE_LICENSE
+
+
+@pytest.mark.parametrize("title", ["TRADE LICENSE", "Kushtia Pourashava Trade License", "Trade License No: 88103074169", "PROFESSIONAL LICENCE"])
+def test_trade_licence_title_on_its_own_line_is_a_trade_licence(title):
+    page = make_page(["Government of the People's Republic of Bangladesh", title, "Fiscal Year: 2026-2027"])
+    assert classify_page(page, TODAY).kind is PageKind.TRADE_LICENSE
+
+
+def test_licence_holder_field_counts_inside_a_long_line():
+    page = make_page(["Name of Licence Holder MD ABDUL KARIM son of late MD RAHIM of Kushtia Sadar Kushtia"])
+    assert classify_page(page, TODAY).kind is PageKind.TRADE_LICENSE

@@ -183,6 +183,21 @@ _LANGUAGE_FORM = re.compile(
 )
 
 
+_TRADE_TITLE = _rx(r"TRE?ADE\s*/?\s*(?:PROFESSION\s*)?LICEN[CS]E", r"PROFESSIONAL\s*LICEN[CS]E")
+TITLE_MAX_WORDS = 8
+
+
+def _trade_signature(text: str) -> bool:
+    """RULES-v13: the English title counts on a short line (a title or a label), not inside a
+    sentence ("my business under a valid trade license"); the other signatures anywhere."""
+    for line in text.splitlines():
+        if SIG["trade"].search(_TRADE_TITLE.sub("", line)):
+            return True
+        if _TRADE_TITLE.search(line) and len(line.split()) <= TITLE_MAX_WORDS:
+            return True
+    return False
+
+
 def _only_translators_licence(text: str) -> bool:
     """Translation agencies print their own 'Trade Licence No. 136130' on every translated
     page (a translated NID, birth certificate, FRC ...). Such a page is a trade licence only
@@ -242,7 +257,7 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.NID, "ID-card MRZ (I<)")
     # A trade licence has the owner's birth-registration field; a birth certificate never
     # mentions a trade licence.
-    if has["trade"] and not _only_translators_licence(text):
+    if _trade_signature(text) and not _only_translators_licence(text):
         return out(PageKind.TRADE_LICENSE, "Trade License")
     if has["death"]:
         return out(PageKind.DEATH_CERTIFICATE, "Death registration number / certificate")
