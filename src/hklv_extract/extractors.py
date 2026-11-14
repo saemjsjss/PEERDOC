@@ -978,6 +978,7 @@ _AMT = r"(?<![@\d.,])(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+\.\d{2}|\d{5,})(?![\d,
 # the code may touch the amount ('(USD12965.43)'), so no \b after it
 _USD_WORD = r"\bUSD(?![A-Za-z])|\bUS\s*\$|\$|\bUS\s*Dollars?\b"
 _BDT_WORD = r"\bBDT(?![A-Za-z])|\bTk\b|\bTaka\b"
+_NUMBER_WORD = r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirt|fift|twenty|forty|sixty|ninety)"
 # currency then amount ('USD 19,338.09'), else amount then currency, but not a rate
 # ('1 USD = 123.70')
 _USD_AMOUNT = (
@@ -986,7 +987,8 @@ _USD_AMOUNT = (
 )
 _BDT_AMOUNT = (
     re.compile(rf"(?:{_BDT_WORD})\s*[:.,]?\s*{_AMT}", re.IGNORECASE),
-    re.compile(rf"{_AMT}\s*/?-?\s*(?:{_BDT_WORD})(?!\s*=)", re.IGNORECASE),
+    # not 'BDT Forty Lakh ...': there the code starts the amount in words that follows
+    re.compile(rf"{_AMT}\s*/?-?\s*(?:{_BDT_WORD})(?!\s*=)(?!\s*{_NUMBER_WORD})", re.IGNORECASE),
 )
 _RATE = re.compile(r"=|@|\bRATE\b", re.IGNORECASE)
 # an exchange rate's figure follows one unit: '01 USD is equivalent to BDT 123.95'
