@@ -533,3 +533,84 @@ def test_all_caps_father_relation_cell_is_not_a_father_label():
     # A family table row read as the father's name gave FatherRef 'P.S'.
     page = make_page(["Birth Registration Certificate", "MD AKRAM ALI FATHER 01/10/1968 P.S: MUJIBNAGAR"])
     assert birth_certificate(_group(PageKind.BIRTH_CERTIFICATE, page), "b").father_name.value is None
+
+
+# --- audit 2026-11-14: must-fix findings 1-7 (RULES-v12) ------------------------------------
+
+
+def test_mrz_name_with_many_filler_words_does_not_hang():
+    from hklv_extract.extractors import _agree_with_mrz
+    from hklv_rules.models import Extracted
+
+    printed = Extracted[str](value="KKKKKKKKKKKK", confidence=0.95, source_page=1)
+    assert _agree_with_mrz(printed, " ".join("K" * 12)) is printed  # 12! orders without the cap
+
+
+def test_register_ocr_timeout_lets_the_running_ocr_finish(monkeypatch):
+    import asyncio
+    import threading
+    import time
+
+    from hklv_pipeline import pipeline
+
+    finished = threading.Event()
+
+    class SlowReader:
+        async def read_file(self, path):
+            await asyncio.sleep(0.3)
+            finished.set()  # a cancel would stop it here, with the GPU lock already released
+            return []
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    monkeypatch.setattr(pipeline, "REGISTER_OCR_SECONDS", 0.05)
+    try:
+        with pytest.raises(TimeoutError):
+            pipeline.register_reader(SlowReader(), loop)([("page", b"\x89PNG....")])
+        assert finished.wait(2)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        time.sleep(0.05)
+
+
+def test_frc_deceased_father_with_no_late_name_read_flags():
+    from builders import death
+
+    no_father = tuple(m for m in frc().members if m.relation.value != "FATHER")
+    r = by_rule(check_frc(context(frc(members=no_father), death())))["FRC-03"]
+    assert r.outcome is Outcome.FLAG
+    assert "no 'Late <name>' read" in r.reason
+
+
+def test_name_against_a_missing_anchor_is_uncertain_not_a_mismatch():
+    from builders import birth_certificate as birth, ex, passport
+
+    from hklv_rules.identity import MatchKind, compare_name
+    from hklv_rules.models import Extracted, Person
+
+    ctx = context(passport(), birth().model_copy(update={"father_name": Extracted[str]()}), with_identity_docs=False)
+    assert compare_name(ex("MD. ABDUL KARIM"), Person.FATHER, ctx).kind is MatchKind.UNCERTAIN
+
+
+def test_trade_licence_issued_after_the_check_date_flags():
+    from builders import FATHER, ex, trade
+
+    from hklv_rules.rules.trade import check_trade_licenses
+
+    t = trade(FATHER, fiscal_year="2024-2025").model_copy(update={"issue_date": ex(date(2027, 3, 1))})
+    r = by_rule(check_trade_licenses(context(t, evaluation_date=date(2027, 1, 15))))["TRADE-03"]
+    assert r.outcome is Outcome.FLAG
+    assert "after the check date" in r.reason
+
+
+def test_words_starting_with_a_month_are_not_months():
+    from hklv_extract.dates import find_dates
+
+    assert find_dates("Total 75 Marks 2024") == []
+    assert find_dates("Class 5 Junior 2019, Janata Bank 12 Janata 2020") == []
+    assert find_dates("5 September 2020 and Sept. 6, 2021") == [date(2020, 9, 5), date(2021, 9, 6)]
+
+
+def test_challan_amount_skips_a_one_digit_serial():
+    page = make_page(["Challan No: 2526-0012345678", "Amount", "1", "Total Amount: 10,000"])  # table header, serial
+    assert tax_challan(_group(PageKind.TAX_CHALLAN, page), "c").printed_amount.value == Decimal("10000")

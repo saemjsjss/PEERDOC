@@ -37,7 +37,7 @@ def compare_name(observed: Extracted[str], person: Person, ctx: EvaluationContex
             reason=f"'{observed.value}' read with low OCR confidence ({observed.confidence:.2f})",
         )
     if anchor.name is None:
-        return NameComparison(kind=MatchKind.MISMATCH, reason=f"{anchor.describe()}")
+        return NameComparison(kind=MatchKind.UNCERTAIN, reason=f"{anchor.describe()}")
     if not anchor.certain:
         return NameComparison(
             kind=MatchKind.UNCERTAIN, reason=f"{anchor.describe()} is uncertain: {anchor.note}"

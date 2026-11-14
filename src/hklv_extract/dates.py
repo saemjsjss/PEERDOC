@@ -23,8 +23,8 @@ _NUMERIC = re.compile(r"\b(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})\b|\b
 # second form: a dot read as a comma ('25.10,2026'); only tight to the digits, never '8, 2, 1902'
 # Year first is unambiguous with any separator: '2003-04-05', '2003/04/05' (TOPIK), '2003.04.05'.
 _ISO = re.compile(r"(?<!\d)(\d{4})([-/.])(\d{2})\2(\d{2})(?!\d)")
-_DAY_MONTH = re.compile(r"\b(\d{1,2})(?:ST|ND|RD|TH)?[\s\-.,/]*(" + _MONTH_RE + r")[A-Z]*[\s\-.,/']*(\d{4})\b", re.IGNORECASE)
-_MONTH_DAY = re.compile(r"\b(" + _MONTH_RE + r")[A-Z]*[\s\-.]*(\d{1,2})(?:ST|ND|RD|TH)?,?\s*(\d{4})\b", re.IGNORECASE)
+_DAY_MONTH = re.compile(r"\b(\d{1,2})(?:ST|ND|RD|TH)?[\s\-.,/]*(" + _MONTH_RE + r")(?![A-Z])[\s\-.,/']*(\d{4})\b", re.IGNORECASE)
+_MONTH_DAY = re.compile(r"\b(" + _MONTH_RE + r")(?![A-Z])[\s\-.]*(\d{1,2})(?:ST|ND|RD|TH)?,?\s*(\d{4})\b", re.IGNORECASE)
 
 
 def _make(y: int, m: int, d: int) -> date | None:

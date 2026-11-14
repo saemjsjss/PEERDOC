@@ -141,6 +141,8 @@ def _agree_with_mrz(printed: Extracted[str], mrz_name: str) -> Extracted[str]:
         return Extracted[str](value=printed.value, confidence=max(printed.confidence, AGREE_CAP), source_page=printed.source_page)
     # Same letters, spacing lost on the card ("KARIMUDDIN"): take the MRZ's word breaks, in
     # the printed order. No letter is changed.
+    if len(words) > 6:  # n! orders: an MRZ read with filler letters as words would never end
+        return printed
     for order in permutations(words):
         if squash("".join(order)) == squash(printed.value):
             return Extracted[str](value=" ".join(order), confidence=max(printed.confidence, AGREE_CAP), source_page=printed.source_page)
@@ -1189,7 +1191,7 @@ def tin_certificate(group: PageGroup, doc_id: str) -> m.TinCertificate:
 
 
 # An amount, optionally after a currency mark ('Tk. 12,000', 'BDT 15,000.00', '1,00,000/-').
-_AMOUNT_VALUE = r"(?:Tk\.?|BDT|Taka|৳)?\s*[\d,]+(?:\.\d{1,2})?(?:\s*/-)?"
+_AMOUNT_VALUE = r"(?:Tk\.?|BDT|Taka|৳)?\s*\d[\d,]{2,}(?:\.\d{1,2})?(?:\s*/-)?"
 
 
 def _amount(group: PageGroup, labels: Sequence[str]) -> Extracted[Decimal]:

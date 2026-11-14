@@ -117,6 +117,8 @@ def _trade_03_fiscal_year(t: TradeLicense, ctx: EvaluationContext) -> RuleResult
         return result(Outcome.FLAG, f"{', '.join(shaky)} read with low OCR confidence; {context}")
     if not seen:
         return result(Outcome.FAIL, f"no validity date, fiscal year or issue date found; {context}")
+    if t.issue_date.found and t.issue_date.value > today:  # Section 0: a date after the check date is a misread
+        return result(Outcome.FLAG, f"issued {t.issue_date.value:%d-%m-%Y} is after the check date (misread); {context}")
     found = ", ".join(f"{what} {d:%d-%m-%Y}" for what, d, _, _ in seen)
     return result(
         Outcome.FAIL,

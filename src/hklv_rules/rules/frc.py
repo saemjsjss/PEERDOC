@@ -163,13 +163,17 @@ _NAME_OK = (MatchKind.EXACT, MatchKind.AFFIDAVIT)
 
 def _deceased_parent(frc: FamilyRelationshipCertificate, person: Person, ctx: EvaluationContext):
     """No row for this parent: allowed when the text names them as "Late <name>" and their
-    death certificate is in the case (RULES-v2 FRC-03). Either missing -> FAIL."""
+    death certificate is in the case (RULES-v2 FRC-03). No death certificate -> FAIL; one
+    but no "Late" name read -> FLAG (RULES-v12: OCR may have missed the line)."""
     label = person.value
     deaths = [d for d in ctx.case.of_kind(DeathCertificate) if compare_name(d.deceased_name, person, ctx).kind in _NAME_OK]
     late = [(n, compare_name(n, person, ctx)) for n in frc.late_names]
     late = [(n, c) for n, c in late if c.kind is not MatchKind.MISMATCH]
-    if not deaths or not late:
+    if not deaths:
         return Outcome.FAIL, f"no {label} row", []
+    if not late:
+        evidence = [ev(deaths[0].doc_id, "deceased_name", deaths[0].deceased_name)]
+        return Outcome.FLAG, f"no {label} row and no 'Late <name>' read, but death certificate {deaths[0].doc_id} is the {label}'s", evidence
     name, cmp = max(late, key=lambda nc: nc[1].kind in _NAME_OK)
     evidence = [ev(frc.doc_id, "late_names", name), ev(deaths[0].doc_id, "deceased_name", deaths[0].deceased_name)]
     reason = f"no {label} row; named as late ({cmp.reason}) and death certificate {deaths[0].doc_id} is the {label}'s"

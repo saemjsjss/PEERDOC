@@ -186,11 +186,8 @@ def register_reader(reader, loop: asyncio.AbstractEventLoop):
                 path = Path(tmp) / f"register_{i}{suffix}"
                 path.write_bytes(img)
                 fut = asyncio.run_coroutine_threadsafe(reader.read_file(path), loop)
-                try:
-                    pages = fut.result(timeout=max(deadline - time.monotonic(), 0))
-                except TimeoutError:
-                    fut.cancel()  # don't leave OCR holding the reader on a deleted file
-                    raise
+                # No cancel on timeout: it would free the GPU lock while the OCR thread runs on.
+                pages = fut.result(timeout=max(deadline - time.monotonic(), 0))
                 if pages:
                     out.append(register_page(pages[0], title))
         return tuple(out)
