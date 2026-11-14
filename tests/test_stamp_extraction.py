@@ -94,3 +94,28 @@ def test_exchange_rate_alone_is_no_usd_amount():
     )
     assert not s.usd_amount.found
     assert s.bdt_amount.value == "BDT 18,01,984.00"
+
+
+def test_usd_amount_touching_its_code():
+    # Islami Bank letter: no space between 'USD' and the amount
+    s = solvency(
+        ("the said account is BDT 1606417.50 as on 25.10.2026(USD12965.43) only. Our Routing number", 0.98, (130, 760, 1620, 800)),
+    )
+    assert s.usd_amount.value == "USD12965.43"
+    assert s.bdt_amount.value == "BDT 1606417.50"
+
+
+def test_exchange_rate_in_a_column_header_is_no_bdt_amount():
+    # SBAC letter: the USD column's header gives the rate '01 USD is equivalent to BDT 123.95'
+    s = solvency(
+        ("Balance equivalent to USD(As", 0.99, (1180, 870, 1640, 900)),
+        ("rate where 01 USD is", 0.99, (1180, 930, 1640, 960)),
+        ("equivalent to BDT 123.95", 0.99, (1180, 960, 1640, 990)),
+        ("Current Balance", 0.99, (910, 870, 1160, 900)),
+        ("(BDT) as on", 0.99, (910, 900, 1160, 930)),
+        ("4,076,500.00", 0.99, (910, 1040, 1100, 1070)),
+        ("32,888.26", 0.99, (1180, 1040, 1340, 1070)),
+        vl="",
+    )
+    assert s.bdt_amount.value == "4,076,500.00"
+    assert s.usd_amount.found

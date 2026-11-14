@@ -975,8 +975,9 @@ def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
 # money, not a row number or year: grouped digits, decimals, or 5+ digits; never a rate's
 # digits ('USD@124.50 BDT')
 _AMT = r"(?<![@\d.,])(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+\.\d{2}|\d{5,})(?![\d,])"
-_USD_WORD = r"\bUSD\b|\bUS\s*\$|\$|\bUS\s*Dollars?\b"
-_BDT_WORD = r"\bBDT\b|\bTk\b|\bTaka\b"
+# the code may touch the amount ('(USD12965.43)'), so no \b after it
+_USD_WORD = r"\bUSD(?![A-Za-z])|\bUS\s*\$|\$|\bUS\s*Dollars?\b"
+_BDT_WORD = r"\bBDT(?![A-Za-z])|\bTk\b|\bTaka\b"
 # currency then amount ('USD 19,338.09'), else amount then currency, but not a rate
 # ('1 USD = 123.70')
 _USD_AMOUNT = (
@@ -988,14 +989,18 @@ _BDT_AMOUNT = (
     re.compile(rf"{_AMT}\s*/?-?\s*(?:{_BDT_WORD})(?!\s*=)", re.IGNORECASE),
 )
 _RATE = re.compile(r"=|@|\bRATE\b", re.IGNORECASE)
+# an exchange rate's figure follows one unit: '01 USD is equivalent to BDT 123.95'
+_AFTER_ONE_UNIT = re.compile(rf"(?<![\d.,])0*1\s*(?:{_USD_WORD})\D{{0,30}}$", re.IGNORECASE)
 _CELL_AMOUNT = re.compile(rf"\W*{_AMT}")  # a cell that starts with the amount ('20191.88(Approximately)')
 
 
 def _amount_under_header(page: PageReading, word: str) -> TextLine | None:
     """A table column headed by the currency ('Balance (USD)') with an amount below it."""
     word_re = re.compile(word, re.IGNORECASE)
+    # a figure right after the currency is a rate or a sum in the text ('to BDT 123.95'), not a header
+    figure_re = re.compile(rf"(?:{word})\W*\d", re.IGNORECASE)
     for h in page.lines:
-        if not word_re.search(h.text) or _RATE.search(h.text):
+        if not word_re.search(h.text) or _RATE.search(h.text) or figure_re.search(h.text):
             continue
         below = [
             o for o in page.lines
@@ -1015,8 +1020,9 @@ def _amount_shown(group: PageGroup, patterns: tuple[re.Pattern[str], ...], word:
         vl = html.unescape(re.sub(r"<[^>]+>", " ", p.block_text))
         for rx in patterns:
             for text, conf in ((lines, AGREE_CAP), (vl, VL_ONLY)):
-                if mt := rx.search(text):
-                    return derived(clean_value(mt.group(0)), conf, p.page_no)
+                for mt in rx.finditer(text):
+                    if not _AFTER_ONE_UNIT.search(text[max(0, mt.start() - 40):mt.start()]):
+                        return derived(clean_value(mt.group(0)), conf, p.page_no)
         if cell := _amount_under_header(p, word):
             return derived(clean_value(cell.text), cell.score, p.page_no)
     return Extracted[str]()
