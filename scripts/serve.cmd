@@ -1,5 +1,5 @@
 @echo off
-rem Start the HKLV API (inside WSL, where the OCR models run). Then open http://127.0.0.1:8000/docs
+rem Start the HKLV API (inside WSL, where the OCR models run). Then open http://127.0.0.1:8010/docs
 rem Stop it with Ctrl+C.
 for %%I in ("%~dp0..") do set "REPO=%%~fI"
 set "DRIVE=%REPO:~0,1%"

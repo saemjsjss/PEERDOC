@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the HKLV API inside the WSL OCR environment (loads the OCR models once, ~20 s).
-#   bash /mnt/c/dcSS/scripts/wsl/serve.sh            -> http://127.0.0.1:8000/docs
+#   bash /mnt/c/dcSS/scripts/wsl/serve.sh            -> http://127.0.0.1:8010/docs
 # Listens on 127.0.0.1 only (reachable from Windows through WSL's localhost forwarding,
 # not from the network). HKLV_PORT changes the port.
 set -euo pipefail
@@ -17,7 +17,7 @@ mkdir -p "$HKLV_WORK_DIR" && chmod 700 "$HKLV_WORK_DIR"
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${LD_LIBRARY_PATH:-}"
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
-PORT="${HKLV_PORT:-8000}"
+PORT="${HKLV_PORT:-8010}"
 export HKLV_PORT="$PORT"   # the server keeps its uploads in a per-port folder
 # Already running (e.g. started in another window)? Say so instead of loading the models
 # for 20 s and then failing with "address already in use".

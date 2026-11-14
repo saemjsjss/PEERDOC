@@ -31,12 +31,12 @@ a fictional verdict made by the real engine: `python scripts/make_ui_fixture.py`
    ```
 
 3. Open <http://127.0.0.1:5173>. The dev server forwards `/jobs`, `/verify` and `/health`
-   to the API on <http://127.0.0.1:8000>.
+   to the API on <http://127.0.0.1:8010>.
 
 ## Use it without the dev server
 
 `npm run build` writes `frontend/dist`; the API server then serves the UI itself at
-<http://127.0.0.1:8000/> (restart the API after building).
+<http://127.0.0.1:8010/> (restart the API after building).
 
 ## How it talks to the server
 
