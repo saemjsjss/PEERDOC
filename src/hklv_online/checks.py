@@ -232,7 +232,7 @@ def check_apostille_number(number: str, fetch: Fetch = http_fetch) -> OnlineChec
         if target is not None and target.scheme == "https" and host == APOSTILLE_HOST and re.fullmatch(r"/verify/[^/]+", target.path):
             return OnlineCheck(
                 status=OnlineStatus.VERIFIED,
-                detail=f"the official register has e-Apostille {number} (its contents were not compared)",
+                detail=f"the official register has e-Apostille {number}",
             )
     error = props.get("apostileError")
     # NOT_FOUND (a FAIL) only for exactly the page the register shows for an unknown number.
@@ -305,6 +305,12 @@ def _with_register(check: OnlineCheck, number: str, source: str, post, get_bytes
             update["register_date"], update["register_pages"], update["register_note"] = register_copy(
                 number, post, get_bytes, read_register
             )
+        pages = update.get("register_pages") or ()
+        update["detail"] = check.detail + (
+            f"; its copy of {len(pages)} document(s) was read for the owner check"
+            if pages
+            else f"; its copy was not read ({update['register_note'] or 'no pages'})"
+        )
     return check.model_copy(update=update)
 
 

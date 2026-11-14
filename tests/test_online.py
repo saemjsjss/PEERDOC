@@ -187,6 +187,8 @@ def test_apply_online_checks_feeds_acad_01():
     assert acad_01 and all(r.outcome is Outcome.PASS for r in acad_01), acad_01
     assert all("student's name" in r.reason for r in acad_01)
     assert verdict.outcome is Outcome.PASS
+    online = [d.online for d in checked.documents if d.kind == "e_apostille"]
+    assert all("was read for the owner check" in o.detail for o in online), online
 
 
 # --- RULES-v10: the register's own copy ----------------------------------------------------
@@ -240,6 +242,7 @@ def test_printed_number_is_looked_up_when_the_qr_is_unreadable():
     [doc] = [d for d in apply_online_checks(case_file(a), web, pause=0).documents if d.kind == "e_apostille"]
     assert web.asked == [URL]
     assert doc.online.status is OnlineStatus.VERIFIED and doc.online.number_source == "printed"
+    assert "its copy was not read (register copy not fetched in this run)" in doc.online.detail
 
 
 def test_apostille_unknown_to_the_register_fails_acad_01():
