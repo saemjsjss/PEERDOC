@@ -113,6 +113,7 @@ def test_exchange_rate_in_a_column_header_is_no_bdt_amount():
         ("equivalent to BDT 123.95", 0.99, (1180, 960, 1640, 990)),
         ("Current Balance", 0.99, (910, 870, 1160, 900)),
         ("(BDT) as on", 0.99, (910, 900, 1160, 930)),
+        ("26.10.2026", 0.99, (910, 930, 1160, 960)),  # the header's date is no amount
         ("4,076,500.00", 0.99, (910, 1040, 1100, 1070)),
         ("32,888.26", 0.99, (1180, 1040, 1340, 1070)),
         ("BDT Forty Lakh Seventy Six Thousand Five Hundred only.", 0.99, (100, 1180, 1100, 1220)),

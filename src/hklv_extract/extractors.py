@@ -974,7 +974,7 @@ def _holder_from_sentence(group: PageGroup) -> Extracted[str]:
 
 # money, not a row number or year: grouped digits, decimals, or 5+ digits; never a rate's
 # digits ('USD@124.50 BDT')
-_AMT = r"(?<![@\d.,])(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+\.\d{2}|\d{5,})(?![\d,])"
+_AMT = r"(?<![@\d.,])(?:\d{1,3}(?:,\d{2,3})+(?:\.\d+)?|\d+\.\d{2}|\d{5,})(?![\d,]|\.\d)"  # not a date's '26.10' of '26.10.2026'
 # the code may touch the amount ('(USD12965.43)'), so no \b after it
 _USD_WORD = r"\bUSD(?![A-Za-z])|\bUS\s*\$|\$|\bUS\s*Dollars?\b"
 _BDT_WORD = r"\bBDT(?![A-Za-z])|\bTk\b|\bTaka\b"
