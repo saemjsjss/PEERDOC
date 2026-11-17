@@ -864,6 +864,37 @@ def _person(text: str) -> Person | None:
     return None
 
 
+# 'the names "A", "B" and "C" refer to one and the same person, who is my father'
+_SAME_SENTENCE = re.compile(
+    r"\bnames?\s+((?:[\"“”][^\"“”]{2,60}[\"“”]\s*(?:,|\band\b)?\s*){2,})refers?\s+to\s+(?:one\s+and\s+)?the\s+same\s+person(?=(.{0,40}))",  # a lookahead: the next sentence may start in it
+    re.IGNORECASE,
+)
+_QUOTED = re.compile(r"[\"“”]([^\"“”]{2,60})[\"“”]")
+
+
+def _same_person_sentences(group: PageGroup) -> tuple[m.AffidavitEntry, ...]:
+    """Each pair of spellings a sentence declares to be one parent (or the student)."""
+    entries = []
+    for page in group.pages:
+        lines = reading_order(page.lines)
+        text, starts = "", []
+        for ln in lines:
+            starts.append(len(text))
+            text += ln.text + " "
+        for mt in _SAME_SENTENCE.finditer(text):
+            person = _person(mt.group(2))
+            if person is None:
+                continue
+            used = [ln for ln, a in zip(lines, starts, strict=True) if a < mt.end() and a + len(ln.text) > mt.start()]
+            score = min(ln.score for ln in used)
+            names = [text_field(Found(clean_value(n), score, page.page_no), page) for n in _QUOTED.findall(mt.group(1))]
+            entries += [
+                m.AffidavitEntry(person=person, existing_name=a, different_name=b)
+                for i, a in enumerate(names) for b in names[i + 1:]
+            ]
+    return tuple(entries)
+
+
 def affidavit(group: PageGroup, doc_id: str) -> m.Affidavit:
     deponent = None
     for page in group.pages:
@@ -895,9 +926,10 @@ def affidavit(group: PageGroup, doc_id: str) -> m.Affidavit:
             if name_cell:
                 by_person.setdefault(person, {})[slot] = _table_field(page, name_cell)
     entries = tuple(
-        m.AffidavitEntry(person=p, existing_name=v.get("existing_name", Extracted[str]()), different_name=v.get("different_name", Extracted[str]()))
+        m.AffidavitEntry(person=p, existing_name=v["existing_name"], different_name=v["different_name"])
         for p, v in by_person.items()
-    )
+        if "existing_name" in v and "different_name" in v  # half an entry bridges nothing
+    ) + _same_person_sentences(group)
     return m.Affidavit(
         doc_id=doc_id,
         pages=group.page_nos,
@@ -994,6 +1026,8 @@ _RATE = re.compile(r"=|@|\bRATE\b", re.IGNORECASE)
 # an exchange rate's figure follows one unit: '01 USD is equivalent to BDT 123.95'
 _AFTER_ONE_UNIT = re.compile(rf"(?<![\d.,])0*1\s*(?:{_USD_WORD})\D{{0,30}}$", re.IGNORECASE)
 _CELL_AMOUNT = re.compile(rf"\W*{_AMT}")  # a cell that starts with the amount ('20191.88(Approximately)')
+# the rate a header gives after '@' ('USD @122.95', 'USD @ 123.95 BDT'): the currency before it names the column
+_AT_RATE = re.compile(rf"@\s*[\d.,]+\s*(?:{_BDT_WORD})?", re.IGNORECASE)
 
 
 def _amount_under_header(page: PageReading, word: str) -> TextLine | None:
@@ -1002,7 +1036,8 @@ def _amount_under_header(page: PageReading, word: str) -> TextLine | None:
     # a figure right after the currency is a rate or a sum in the text ('to BDT 123.95'), not a header
     figure_re = re.compile(rf"(?:{word})\W*\d", re.IGNORECASE)
     for h in page.lines:
-        if not word_re.search(h.text) or _RATE.search(h.text) or figure_re.search(h.text):
+        head = _AT_RATE.sub(" ", h.text)
+        if not word_re.search(head) or _RATE.search(head) or figure_re.search(head):
             continue
         below = [
             o for o in page.lines

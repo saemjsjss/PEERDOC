@@ -23,8 +23,7 @@ from ..context import EvaluationContext
 from ..identity import MatchKind, compare_name
 from ..models import BirthCertificate, Language, Outcome, Passport, Person, RuleResult
 from ._evidence import ev
-from ..names import normalize_name
-from ._shared import digits, edit_distance, notary_rule, translation_rule
+from ._shared import digits, notary_rule, translation_rule
 
 BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04, BIRTH_05 = "BIRTH-01", "BIRTH-02", "BIRTH-03", "BIRTH-04", "BIRTH-05"
 ALL_RULES = (BIRTH_01, BIRTH_02, BIRTH_03, BIRTH_04, BIRTH_05)
@@ -220,21 +219,5 @@ def _birth_05_name(cert: BirthCertificate, ctx: EvaluationContext) -> RuleResult
     else:
         cmp = compare_name(cert.name, Person.STUDENT, ctx)
         outcome, reason = _NAME_OUTCOME[cmp.kind], f"name {cmp.reason}"
-        if cmp.kind is MatchKind.MISMATCH and _near_miss(cert.name.value, ctx.anchors.student.name):
-            outcome, reason = Outcome.FLAG, f"{reason}; only a letter or two apart, which may be an OCR misread"
     return RuleResult(rule_id=BIRTH_05, outcome=outcome, reason=f"{_label(cert)}: {reason}", evidence=evidence)
 
-
-def _short_key(name: str) -> str:
-    # 'MDKAMAL' (OCR lost the space) vs 'MOHAMMAD KAMAL': compare the titles short.
-    key = normalize_name(name)
-    for title, short in (("MOHAMMAD", "MD"), ("MOSAMMAT", "MST")):
-        if key.startswith(title):
-            key = short + key[len(title):]
-    return key
-
-
-def _near_miss(observed: str, reference: str) -> bool:
-    """Up to two letters apart: an OCR slip on old or low-resolution certificates, so a
-    person looks at it instead of the case FAILing. Further apart is a real mismatch."""
-    return edit_distance(_short_key(observed), _short_key(reference)) <= 2

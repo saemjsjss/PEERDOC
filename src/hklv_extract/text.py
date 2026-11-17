@@ -177,7 +177,7 @@ def closest_window(needle: str, haystack: str) -> tuple[int, str]:
         return (0, needle)
     best = (len(needle) + 1, "")
     n = len(needle)
-    for size in (n - 1, n, n + 1):
+    for size in (n, n - 1, n + 1):  # same length first: the window is the other reader's spelling
         if size <= 0:
             continue
         for start in range(0, max(1, len(haystack) - size + 1)):

@@ -81,7 +81,8 @@ SIG = {
     ),
     # 'CERTIFI?CA?TE': some councils print 'CERTIFICTE'.
     "frc": _rx(r"FAMILY\s*RELATIONSHIP\s*CERTIFI?CA?TE", r"FAMILY\s*CERTIFI?CA?TE", r"ওয়ারিশ"),
-    "frc_issuer": _rx(r"UNION\s*PARI?S(?:H|S)?AD", r"UNION\s*PORISHAD", r"POURASHAVA", r"PAURASHAVA", r"MUNICIPALITY", r"CITY\s*CORPORATION"),
+    "frc_issuer": _rx(r"UNION\s*PARI?S(?:H|S)?AD", r"UNION\s*PORISHAD", r"POURASHAVA", r"PAURASHAVA", r"MUNICIPALITY", r"CITY\s*CORPORATION",
+                     r"সিটি\s*কর্পোরেশন", r"পৌরসভা", r"ইউনিয়ন\s*পরিষদ"),  # RULES-v14: the Bangla letterhead
     "challan": _rx(r"CHALLAN\s*FORM", r"চালান\s*ফরম", r"\bA-?CHALLAN\b", r"CHALLAN\s*HAS\s*BEEN\s*GENERATED"),
     "tax_ack": _rx(r"ACKNOWLEDGE?MENT\s*RECEIPT"),
     # TIN certificates also say "file the Return of Income": checked after TIN.
@@ -103,7 +104,7 @@ SIG = {
     "to_whom": _rx(r"TO\s*WHOM\s*IT\s*MAY\s*CONCERN"),
     "bank": _rx(r"\bBANK\b", r"\bBRANCH\b"),
     "account": _rx(r"\bA/?C\b", r"\bACCOUNT\b"),
-    "statement": _rx(r"STATEMENT\s*OF\s*ACCOUNT", r"ACCOUNT\s*STATEMENT", r"BANK\s*STATEMENT"),
+    "statement": _rx(r"STATEMENT\s*OF\s*ACCOUNT", r"ACCOUNT\s*STATEMENT", r"BANK\s*STATEMENT(?!S)"),  # not a CV's 'reconcile ... with bank statements'
     # Also the subject list: a notary stamp can cover the title. Not "Letter Grade":
     # certificates print the grading-scale legend too.
     "transcript": _rx(r"ACADEMIC\s*TRANSCRIPT", r"\bTRANSCRIPT\b", r"GRADE\s*SHEET", r"MARK\s*SHEET", r"NAME\s*OF\s*(?:THE\s*)?SUBJECTS?"),
@@ -198,6 +199,14 @@ def _trade_signature(text: str) -> bool:
     return False
 
 
+_FRC_TABLE = re.compile(r"\bRELATION(?:SHIP)?\b", re.IGNORECASE)
+
+
+def _frc_title(text: str) -> bool:
+    """'Family (Relationship) Certificate' as a title, not a document an affidavit lists in a sentence."""
+    return any(SIG["frc"].search(line) and len(line.split()) <= TITLE_MAX_WORDS for line in text.splitlines())
+
+
 def _only_translators_licence(text: str) -> bool:
     """Translation agencies print their own 'Trade Licence No. 136130' on every translated
     page (a translated NID, birth certificate, FRC ...). Such a page is a trade licence only
@@ -249,6 +258,10 @@ def classify_page(page: PageReading, today: date) -> PageClass:
         return out(PageKind.PASSPORT, "passport MRZ (P<)" + (" + PASSPORT" if has["passport"] else ""))
     if has["apostille"]:
         return out(PageKind.E_APOSTILLE, "Apostille")
+    # A family certificate may cite the affidavit it was issued on ("according to ... affidavit
+    # (No.28)"): its title, issuer and member table make it an FRC first.
+    if has["frc_issuer"] and _FRC_TABLE.search(text) and _frc_title(text) and not re.search(r"SAME\s+PERSON", text, re.IGNORECASE):
+        return out(PageKind.FRC, "Family certificate title + issuer + relationship table")
     # An affidavit lists other documents by name ("Birth Certificate", "Mother's NID"), so it
     # is recognised before the documents it mentions.
     if has["affidavit"]:

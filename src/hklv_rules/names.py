@@ -3,7 +3,7 @@
 Agreed policy: clean up case, punctuation, spacing, 'S/O ...'-style parentage
 suffixes and the MD/MST abbreviations, then names must be identical. Anything
 else (ASRAF vs ASHRAF, RAHIMA vs RAHIMA BEGUM, MST X vs X) is a mismatch that
-only a notarised affidavit can bridge.
+only a notarised affidavit can bridge. A letter or two apart is FLAG, never FAIL (RULES-v14).
 """
 
 from __future__ import annotations
@@ -66,3 +66,30 @@ _DIGIT_TO_LETTER = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "6": "
 def mrz_name_matches(mrz: str, printed: str) -> bool:
     """same_name, reading digits in the MRZ name as their look-alike letters."""
     return same_name(mrz.translate(_DIGIT_TO_LETTER), printed)
+
+
+def edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance: insertions, deletions and substitutions each count one."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _short_key(name: str) -> str:
+    # compare the titles short, so MOHAMMAD/MD is not four letters of difference
+    key = normalize_name(name)
+    for title, short in (("MOHAMMAD", "MD"), ("MOSAMMAT", "MST")):
+        if key.startswith(title):
+            key = short + key[len(title):]
+    return key
+
+
+def near_miss(a: str, b: str) -> bool:
+    """RULES-v14: at most two letters apart ('TAMIN'/'TAMIM', 'HAQUE'/'HOQUE'). A dropped or
+    added word is not a near miss: 'MD ABDUL HOQUE' and 'ABDUL HOQUE' differ by the title."""
+    ka, kb = _short_key(a), _short_key(b)
+    return abs(len(ka) - len(kb)) <= 1 and edit_distance(ka, kb) <= 2

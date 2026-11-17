@@ -56,10 +56,22 @@ def score_text(found: Found, page: PageReading) -> float:
     return found.score * SINGLE_READER_FACTOR
 
 
+def second_reading(value: str, page: PageReading) -> str | None:
+    """PaddleOCR-VL's differing reading of `value` (squashed), for the rules' second look at a name.
+    None when the line reader also has that reading elsewhere on the page: it is then another
+    field (a sibling's row), not this one read differently."""
+    dist, window = closest_window(squash(value), squash(page.block_text))
+    if dist == 0 or not window or window in squash(page.line_text):
+        return None
+    return window
+
+
 def text_field(found: Found | None, page: PageReading | None) -> Extracted[str]:
     if found is None or page is None:
         return Extracted[str]()
-    return Extracted[str](value=found.value, confidence=round(score_text(found, page), 4), source_page=found.page_no)
+    conf = score_text(found, page)
+    second = second_reading(found.value, page) if conf == DISAGREE else None
+    return Extracted[str](value=found.value, confidence=round(conf, 4), source_page=found.page_no, second_read=second)
 
 
 def derived(value: T | None, confidence: float, page_no: int | None) -> Extracted:

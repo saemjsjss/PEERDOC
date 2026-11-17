@@ -10,6 +10,7 @@ from ..context import EvaluationContext
 from ..identity import ALL_PEOPLE, IdStatus, MatchKind, compare_name, identify
 from ..models import Extracted, Language, NotaryInfo, Outcome, Person, RuleResult
 from ..models.common import Frozen
+from ..names import edit_distance
 from ._evidence import ev
 
 
@@ -41,17 +42,6 @@ def digit_difference(a: str, b: str) -> int:
     if len(a) == len(b):
         return sum(ca != cb for ca, cb in zip(a, b, strict=True))
     return edit_distance(a, b)
-
-
-def edit_distance(a: str, b: str) -> int:
-    """Levenshtein distance: insertions, deletions and substitutions each count one."""
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        for j, cb in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-        prev = cur
-    return prev[-1]
 
 
 def number_match_rule(

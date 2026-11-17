@@ -310,6 +310,31 @@ def test_affidavit_entries_from_the_two_tables():
     assert (entry.existing_name.value, entry.different_name.value) == ("RAHIMA BEGUM", "RAHIMA")
 
 
+def test_affidavit_entries_from_the_same_person_sentence():
+    # one table per person (relation in a merged first cell), and the declaration as a sentence
+    page = make_page(
+        [
+            "AFFIDAVIT OF SAME PERSON",
+            "I, KAMAL UDDIN, Date of Birth: 01/01/2003, S/o Abdul Karim & Rahima Begum",
+            'I, declare that the names "ABDUL KARIM MIAH", "MD ABDUL KARIM"',
+            'and "ABDUL KARIM" refer to one and the same person, who is my father, and',
+            'that the names "RAHIMA KHATUN" and"RAHIMA BEGUM" refer to',
+            "one and the same person, namely my mother.",
+        ],
+        blocks=[
+            table_block([["FATHER", "MD ABDUL KARIM", "FATHER NID"], ["ABDUL KARIM", "PASSPORT"]]),
+            table_block([["MOTHER", "RAHIMA KHATUN", "MOTHER NID"], ["RAHIMA BEGUM", "PASSPORT"]]),
+        ],
+    )
+    (g,) = groups_for(page)
+    doc = affidavit(g, "affidavit-1")
+    pairs = {(e.person, frozenset((e.existing_name.value, e.different_name.value))) for e in doc.entries}
+    assert (Person.MOTHER, frozenset(("RAHIMA KHATUN", "RAHIMA BEGUM"))) in pairs
+    assert (Person.FATHER, frozenset(("MD ABDUL KARIM", "ABDUL KARIM"))) in pairs
+    assert (Person.FATHER, frozenset(("ABDUL KARIM MIAH", "MD ABDUL KARIM"))) in pairs
+    assert all(e.existing_name.found and e.different_name.found for e in doc.entries)
+
+
 def test_build_case_end_to_end_runs_the_rules():
     from hklv_rules.engine import evaluate_case
 

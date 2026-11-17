@@ -10,7 +10,7 @@ from enum import Enum
 from .context import EvaluationContext
 from .models import Affidavit, Extracted, Person
 from .models.common import Frozen
-from .names import normalize_name, same_name
+from .names import near_miss, normalize_name, same_name
 
 ALL_PEOPLE = (Person.STUDENT, Person.FATHER, Person.MOTHER)
 
@@ -32,6 +32,12 @@ def compare_name(observed: Extracted[str], person: Person, ctx: EvaluationContex
     if not observed.found or not normalize_name(observed.value):
         return NameComparison(kind=MatchKind.UNCERTAIN, reason="name not found by OCR")
     if not observed.is_reliable(ctx.threshold):
+        if anchor.name and anchor.certain and observed.second_read and normalize_name(observed.second_read) == normalize_name(anchor.name):
+            # RULES-v14 second look: the readers disagree and one of them reads the reference name
+            return NameComparison(
+                kind=MatchKind.EXACT,
+                reason=f"'{observed.value}' matches {anchor.describe()} (the second OCR reader read it exactly)",
+            )
         return NameComparison(
             kind=MatchKind.UNCERTAIN,
             reason=f"'{observed.value}' read with low OCR confidence ({observed.confidence:.2f})",
@@ -50,6 +56,13 @@ def compare_name(observed: Extracted[str], person: Person, ctx: EvaluationContex
             kind=kind, reason=f"'{observed.value}' matches {anchor.describe()} via {why}"
         )
     detail = f" ({why})" if why else ""
+    if kind is MatchKind.MISMATCH and near_miss(observed.value, anchor.name):
+        # RULES-v14: both readers agree on a spelling a letter or two off: a typo on the document
+        # or a misread; a person decides, never a FAIL
+        return NameComparison(
+            kind=MatchKind.UNCERTAIN,
+            reason=f"'{observed.value}' is a letter or two from {anchor.describe()}; may be a typo or misread, confirm manually{detail}",
+        )
     return NameComparison(
         kind=kind, reason=f"'{observed.value}' does not match {anchor.describe()}{detail}"
     )

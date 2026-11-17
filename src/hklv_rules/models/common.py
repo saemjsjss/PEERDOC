@@ -25,6 +25,7 @@ class Extracted(Frozen, Generic[T]):
     value: T | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     source_page: int | None = Field(default=None, ge=1)
+    second_read: str | None = Field(default=None, description="The other OCR reader's differing reading (letters and digits only)")
 
     @property
     def found(self) -> bool:

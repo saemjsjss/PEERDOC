@@ -82,7 +82,10 @@ The same words recur across document types, so the order of checks is part of th
 1. Photo (image file, almost no text), passport (passport MRZ), e-Apostille.
 2. **Affidavit** ("Affidavit", "same person"): it lists other documents by name ("Birth
    Certificate", "Mother's NID"). "Notary Public" alone is not a signature: every notarised
-   translation has it.
+   translation has it. Checked just before it: a family certificate with its title on a
+   line of at most 8 words, a local-government issuer and a "Relationship" column is an
+   FRC, even when it cites the affidavit it was issued on ("according to ... affidavit
+   (No.28)"). An affidavit that lists "Family Certificate" has no member table.
 3. NID with an ID-card MRZ.
 4. **Trade License** (also its verification QR, ".../verify/trade..."): it has the owner's
    birth-registration field. The English title counts only on a line of at most 8 words

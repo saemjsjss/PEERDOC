@@ -121,3 +121,19 @@ def test_exchange_rate_in_a_column_header_is_no_bdt_amount():
     )
     assert s.bdt_amount.value == "4,076,500.00"
     assert s.usd_amount.found
+
+
+def test_usd_column_header_with_its_rate():
+    # NRBC letter: 'Balance Eqvt. to USD @122.95' heads the USD column
+    s = solvency(
+        ("Balance in", 0.99, (1030, 1110, 1220, 1140)),
+        ("BDT as on", 0.99, (1030, 1140, 1220, 1170)),
+        ("02.09.2026", 0.99, (1030, 1170, 1220, 1200)),
+        ("Balance Eqvt. to", 0.99, (1240, 1110, 1480, 1140)),
+        ("USD @122.95", 0.99, (1250, 1140, 1460, 1170)),
+        ("1,870,442.50", 0.99, (1030, 1230, 1220, 1260)),
+        ("15,213.03", 0.99, (1270, 1230, 1440, 1260)),
+        vl="",
+    )
+    assert s.usd_amount.value == "15,213.03"
+    assert s.bdt_amount.value == "1,870,442.50"

@@ -399,7 +399,7 @@ def test_matching_name_and_dob_pass():
 
 
 def test_name_mismatch_flags():
-    r = acad04(cert(name="TANVIR AHMAD"))
+    r = acad04(cert(name="TANVIR HASAN"))
     assert r.outcome is Outcome.FLAG
     assert "does not match" in r.reason
 

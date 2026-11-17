@@ -639,3 +639,75 @@ def test_trade_licence_title_on_its_own_line_is_a_trade_licence(title):
 def test_licence_holder_field_counts_inside_a_long_line():
     page = make_page(["Name of Licence Holder MD ABDUL KARIM son of late MD RAHIM of Kushtia Sadar Kushtia"])
     assert classify_page(page, TODAY).kind is PageKind.TRADE_LICENSE
+
+
+# --- a family certificate citing its affidavit; a CV mentioning bank statements --------------
+
+
+FAMILY_CERTIFICATE = [
+    "FAMILY CERTIFICATE",
+    "This is to certify that, according to his submitted documents and affidavit (No.28, Date: 11.10.2026)",
+    "the family of KAMAL UDDIN Consists of following members:",
+    "S.L Name Relationship Date of Birth NID No",
+    "01 KAMAL UDDIN Self 10.05.1997 1234567890",
+    "02 ABDUL KARIM Father 28.11.1970 2345678901",
+]
+
+
+def test_family_certificate_citing_its_affidavit_is_an_frc():
+    # the issuer only in the Bangla letterhead, read by the layout reader; the English seal unreadable
+    page = make_page(FAMILY_CERTIFICATE, vl_text="\n".join(["চট্টগ্রাম সিটি কর্পোরেশন", *FAMILY_CERTIFICATE]))
+    assert classify_page(page, TODAY).kind is PageKind.FRC
+
+
+def test_affidavit_listing_a_family_certificate_stays_an_affidavit():
+    page = make_page([
+        "AFFIDAVIT",
+        "I, KAMAL UDDIN, of Ward 8, Chattogram City Corporation, do hereby solemnly declare",
+        "Documents: Passport, Birth Certificate,",
+        "Family Certificate",
+        "Document's Name | Name | Relation",
+        "that KAMAL UDDIN and KAMAL UDDIN MD are the same person.",
+    ])
+    assert classify_page(page, TODAY).kind is PageKind.AFFIDAVIT
+
+
+def test_cv_mentioning_bank_statements_is_not_a_statement():
+    page = make_page([
+        "KAMAL UDDIN",
+        "PROFESSIONAL EXPERIENCE",
+        "Follow up on payments and reconcile records with bank statements.",
+    ])
+    assert classify_page(page, TODAY).kind is not PageKind.BANK_STATEMENT
+
+
+# --- RULES-v14: a name a letter or two off gets a second look, never a FAIL ---------------
+
+
+def test_near_miss_name_flags_and_a_dropped_title_does_not():
+    from builders import ex
+
+    from hklv_rules.identity import MatchKind, compare_name
+    from hklv_rules.models import Person
+
+    ctx = context()
+    assert compare_name(ex("TANVIR AHMAD"), Person.STUDENT, ctx).kind is MatchKind.UNCERTAIN
+    assert compare_name(ex("MD. KAMAL UDDIN"), Person.FATHER, ctx).kind is MatchKind.EXACT
+    assert compare_name(ex("KAMAL UDDIN"), Person.FATHER, ctx).kind is MatchKind.MISMATCH  # the title is no letter slip
+    assert compare_name(ex("JAMAL HOSSAIN"), Person.FATHER, ctx).kind is MatchKind.MISMATCH
+
+
+def test_second_reader_confirms_the_reference_spelling():
+    from hklv_extract.confidence import text_field
+    from hklv_extract.text import Found
+    from hklv_rules.identity import MatchKind, compare_name
+    from hklv_rules.models import Person
+
+    ctx = context()
+    page = make_page(["Name: TANVIR AHMEO"], vl_text="Name: TANVIR AHMED")
+    name = text_field(Found("TANVIR AHMEO", 0.99, 1), page)
+    assert name.second_read == "TANVIRAHMED"
+    assert compare_name(name, Person.STUDENT, ctx).kind is MatchKind.EXACT
+    # the line reader has that spelling elsewhere (a sibling's row): no confirmation
+    rows = make_page(["TANVIR AHMEO", "TANVIR AHMED"], vl_text="TANVIR AHMED\nTANVIR AHMED")
+    assert text_field(Found("TANVIR AHMEO", 0.99, 1), rows).second_read is None
