@@ -1455,6 +1455,21 @@ def _student_name(group: PageGroup) -> Extracted[str]:
             candidate = re.split(r"\s+(?:Son|Daughter|S/O|D/O)\b", candidate, flags=re.IGNORECASE)[0]
             if re.fullmatch(NAME, candidate or ""):
                 return text_field(Found(candidate, src.score, page.page_no), page)
+    # University degrees: "...HAS CONFERRED THE DEGREE OF <degree> UPON" with the name on the row
+    # below, often split into pieces by its script font ("Mahima" | "Afroz").
+    for page in group.pages:
+        for ln in page.lines:
+            if not re.fullmatch(r"\s*UPON\s*", ln.text, re.IGNORECASE):
+                continue
+            h = max(1, ln.box[3] - ln.box[1])
+            below = [o for o in page.lines if ln.box[3] - h * 0.25 < (o.box[1] + o.box[3]) / 2 <= ln.box[3] + 4 * h]
+            if not below:
+                continue
+            top = min(below, key=lambda o: o.box[1])
+            row = sorted((o for o in below if top.box[1] <= (o.box[1] + o.box[3]) / 2 <= top.box[3]), key=lambda o: o.box[0])
+            candidate = clean_value(" ".join(o.text for o in row))
+            if re.fullmatch(NAME, candidate or ""):
+                return text_field(Found(candidate, min(o.score for o in row), page.page_no), page)
     return Extracted[str]()
 
 

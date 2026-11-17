@@ -416,6 +416,24 @@ def test_certificate_name_to_the_right_of_certify_that():
     assert cert.date_of_birth.value == date(2000, 8, 5)
 
 
+def test_degree_name_below_upon():
+    # Daffodil University degree: the name in script font, split in two, on the row under "UPON".
+    from hklv_extract.extractors import academic_certificate
+    from hklv_ocr.reading import TextLine
+
+    page = make_page(["x"]).model_copy(update={"lines": (
+        TextLine(text="HAS CONFERRED THE DEGREE OF", score=0.99, box=(1314, 1010, 2147, 1069)),
+        TextLine(text="& Food Engineering", score=0.97, box=(1950, 1119, 2737, 1337)),
+        TextLine(text="UPON", score=1.0, box=(1637, 1360, 1812, 1420)),
+        TextLine(text="Mahima", score=1.0, box=(1200, 1413, 1919, 1577)),
+        TextLine(text="Afroz", score=0.92, box=(1848, 1392, 2388, 1587)),
+        TextLine(text="201-34-321", score=1.0, box=(1475, 1592, 2040, 1693)),
+        TextLine(text="ID No.", score=1.0, box=(1244, 1626, 1418, 1683)),
+    )})
+    cert = academic_certificate(_group(PageKind.ACADEMIC_CERTIFICATE, page), "c")
+    assert cert.student_name.value == "Mahima Afroz"
+
+
 def test_dot_read_as_a_comma_in_a_date():
     from hklv_extract.dates import find_dates
 
