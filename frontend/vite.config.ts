@@ -15,7 +15,7 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    port: 5174, // 5173 is taken by the dashboard project (C:\dashb)
     strictPort: true,
     proxy: {
       '/jobs': API,
